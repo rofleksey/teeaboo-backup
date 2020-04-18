@@ -19,3 +19,9 @@ yarn-error.log*
 *.njsproj
 *.sln
 *.sw?
+
+# data sets
+/compiler/test-samples
+/compiler/temp
+/compiler/test.mp4
+log.txt
