@@ -31,7 +31,7 @@ const zoomTime = 2;
 const zoomLateTime = 1;
 const zoomFactor = 1.75;
 const zoomSlowFactor = 1.6;
-const expectedSize = [1280, 720];
+const expectedSize = [];
 
 const args = require('yargs')
   .scriptName('compiler')
@@ -45,17 +45,6 @@ const args = require('yargs')
     alias: 'tee',
     demandOption: true,
     describe: 'path to teeaboo video',
-    type: 'string',
-  })
-  .option('r', {
-    alias: 'reuse',
-    default: false,
-    describe: 'reuse already generated files',
-    type: 'boolean',
-  })
-  .option('d', {
-    alias: 'dir',
-    describe: 'temp directory to use (for testing only)',
     type: 'string',
   })
   .option('o', {
@@ -297,7 +286,7 @@ async function getReactionTimeIntervals(youtubeIntervals) {
 async function generateVideo(youtubeIntervals, reactionIntervals) {
   console.log('Generating video...');
   for (let i = 0; i < youtubeIntervals.length; i += 1) {
-    if (!args.r || !fs.existsSync(path.join(args.o, `temp_part${i}.mp4`))) {
+    if (!fs.existsSync(path.join(args.o, `temp_part${i}.mp4`))) {
       // eslint-disable-next-line no-await-in-loop
       await new Promise((res, rej) => {
         const bar = new ProgressBar(`Generating video part (${i + 1} / ${youtubeIntervals.length}) [:bar] :percent :etas`, {
@@ -387,6 +376,7 @@ async function generateVideo(youtubeIntervals, reactionIntervals) {
       ])
       .outputOptions([
         '-c copy',
+        '-movflags faststart',
       ])
       .on('start', (commandLine) => {
         console.log(`\n${commandLine}\n`);
@@ -409,10 +399,31 @@ async function generateVideo(youtubeIntervals, reactionIntervals) {
   fs.unlinkSync(path.join(args.o, 'concat_list_temp.txt'));
 }
 
+async function determineTeeSize() {
+  await new Promise((res, rej) => {
+    ffmpeg.ffprobe(args.tee, (err, metadata) => {
+      if (err) {
+        rej(err);
+        return;
+      }
+      const videoStream = metadata.streams.find((it) => it.width);
+      if (!videoStream) {
+        rej(new Error('Can\'t determine video size!'));
+        return;
+      }
+      expectedSize.push(videoStream.width);
+      expectedSize.push(videoStream.height);
+      console.log(`Tee video size: ${expectedSize}`);
+      res();
+    });
+  });
+}
+
 (async () => {
   const youtubeTempFolder = tmp.dirSync();
-  const youtubeTempFolderPath = args.dir ? args.dir : youtubeTempFolder.name;
+  const youtubeTempFolderPath = youtubeTempFolder.name;
   try {
+    await determineTeeSize();
     // youtube
     const youtubeImages = await findImagesInDir(youtubeTempFolderPath);
     if (youtubeImages.length === 0) {

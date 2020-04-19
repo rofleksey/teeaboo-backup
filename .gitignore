@@ -20,9 +20,9 @@ yarn-error.log*
 *.sln
 *.sw?
 
-# data sets
-/compiler/test-samples
-/compiler/temp
-/compiler/test.mp4
-/compiler/output
+# tee
+/server/compiler/test-samples
+/server/compiler/temp
+/server/compiler/test.mp4
+output
 log.txt
