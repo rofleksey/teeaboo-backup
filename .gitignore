@@ -24,4 +24,5 @@ yarn-error.log*
 /compiler/test-samples
 /compiler/temp
 /compiler/test.mp4
+/compiler/output
 log.txt

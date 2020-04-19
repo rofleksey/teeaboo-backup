@@ -1,21 +1,30 @@
 const ffmpeg = require('fluent-ffmpeg');
 const tmp = require('tmp');
 const Jimp = require('jimp');
-const cliProgress = require('cli-progress');
+const ProgressBar = require('progress');
 
 const { promisify } = require('util');
 const fs = require('fs');
 const path = require('path');
 
-// const readFile = promisify(fs.readFile);
+// TODO: fix temp files leak on process.exit and ctrl + c
+
+const writeFile = promisify(fs.writeFile);
 const readdir = promisify(fs.readdir);
 
 const framesPerSecond = 4;
-const frameInterval = 1000 / framesPerSecond;
+const searchForBlackFramesPerSecond = 20;
 const minBlackDurationSeconds = 60;
 const minBlackFrames = minBlackDurationSeconds * framesPerSecond;
 const colorThreshold = 3;
+const maxCreditsSearchSeconds = 20;
+const minCreditsSearchSeconds = 1;
+const fullBlackCountThreshold = 0.75;
+const fullBlackColorThreshold = 10;
+const reactionFromYoutubeSafetySeconds = 15;
+
 const [cropW, cropH, cropOffsetX, cropOffsetY] = [100, 3, 10, 10];
+const timerTime = 5;
 const speedUpTime = 15;
 const speedUpFactor = 8;
 const zoomTime = 2;
@@ -31,7 +40,6 @@ const args = require('yargs')
     demandOption: true,
     describe: 'path to episode',
     type: 'string',
-    array: true,
   })
   .option('t', {
     alias: 'tee',
@@ -39,44 +47,62 @@ const args = require('yargs')
     describe: 'path to teeaboo video',
     type: 'string',
   })
+  .option('r', {
+    alias: 'reuse',
+    default: false,
+    describe: 'reuse already generated files',
+    type: 'boolean',
+  })
   .option('d', {
     alias: 'dir',
     describe: 'temp directory to use (for testing only)',
     type: 'string',
   })
+  .option('o', {
+    alias: 'output',
+    demandOption: true,
+    describe: 'output directory',
+    type: 'string',
+  })
   .help()
   .argv;
 
-function extractThumbnails(folder, video) {
+// ARGUMENTS AND RETURN VALUES SHOULD BE SECONDS EVERYWHERE!
+
+function extractThumbnails(folder, video, opts) {
   console.log('Extracting thumbnails...');
+  const options = opts || {};
+  console.log(options);
   return new Promise((res, rej) => {
-    const bar = new cliProgress.SingleBar({
-      hideCursor: true,
-    }, cliProgress.Presets.shades_classic);
-    bar.start(100);
+    const bar = new ProgressBar('extracting thumbnails [:bar] :percent :etas', {
+      complete: '=',
+      incomplete: ' ',
+      width: 20,
+      total: 100,
+    });
     let lastPercentage = 0;
-    ffmpeg(video, {
+    let command = ffmpeg(video, {
       // stdoutLines: Infinity,
     })
       .videoFilters([
-        `fps=${framesPerSecond}`,
-        `crop=${cropW}:${cropH}:${cropOffsetX}:in_h-${cropH + cropOffsetY}`,
-        'showinfo',
-      ])
-      .on('end', () => {
-        bar.stop();
-        res();
-      })
+        `fps=${opts.fps || framesPerSecond}`,
+      ].concat(options.crop ? [`crop=${cropW}:${cropH}:${cropOffsetX}:in_h-${cropH + cropOffsetY}`] : []));
+    if (options.from && options.to) {
+      command = command
+        .outputOptions([
+          `-ss ${options.from}`,
+          `-to ${options.to}`,
+        ]);
+    }
+    command
+      .on('end', res)
+      .on('error', rej)
       .on('progress', (info) => {
         const ceiledPercent = Math.ceil(info.percent);
         if (ceiledPercent !== lastPercentage) {
           lastPercentage = ceiledPercent;
-          bar.increment();
+          bar.tick();
         }
-      })
-      .on('error', (e) => {
-        bar.stop();
-        rej(e);
       })
       // .on('end', (stdout, stderr) => {
       //   console.log(stdout);
@@ -113,128 +139,300 @@ async function findImagesInDir(folder) {
 //   return `${pad(seconds)}.${pad(ms, 3)}`;
 // }
 
-async function getReactionIntervals(folder) {
-  console.log('Getting reaction time intervals...');
-  const bar = new cliProgress.SingleBar({}, cliProgress.Presets.shades_classic);
+async function getYoutubeIntervals(folder) {
+  console.log('Getting youtube time intervals...');
   const sortedImages = await findImagesInDir(folder);
   const result = [];
   let lastBlack = -1;
-  bar.start(sortedImages.length);
+  const bar = new ProgressBar('Getting youtube intervals [:bar] :rate/fps :percent :etas', {
+    complete: '=',
+    incomplete: ' ',
+    width: 20,
+    total: sortedImages.length,
+  });
+
+  for (let i = 0; i < sortedImages.length; i += 1) {
+    const imagePath = sortedImages[i];
+    // eslint-disable-next-line no-await-in-loop
+    const img = await Jimp.read(imagePath);
+    let isBlack = true;
+    for (let x = 0; x < img.getWidth(); x += 1) {
+      const color = Jimp.intToRGBA(img.getPixelColor(x, img.getHeight() - 1));
+      if (color.r > colorThreshold || color.g > colorThreshold || color.b > colorThreshold) {
+        isBlack = false;
+        break;
+      }
+    }
+    if (isBlack) {
+      if (lastBlack === -1) {
+        bar.interrupt('Found potential start of the reaction');
+        lastBlack = i;
+      }
+    } else if (lastBlack !== -1) {
+      if (i - lastBlack > minBlackFrames) {
+        result.push([lastBlack / framesPerSecond, (i - 1) / framesPerSecond]);
+      } else {
+        bar.interrupt('Potential reaction interval is too short, discarded');
+      }
+      lastBlack = -1;
+    }
+    bar.tick();
+  }
+  if (lastBlack !== -1) {
+    result.push([lastBlack / framesPerSecond, (sortedImages.length - 1) / framesPerSecond]);
+  }
+  return result;
+}
+
+async function searchForBlackFrames(from, to, threshold) {
+  console.log('Checking for black frames...');
+  const tempFolder = tmp.dirSync();
+  let lastBlack = -1;
   try {
+    await extractThumbnails(tempFolder.name, args.e, {
+      from,
+      to,
+      fps: searchForBlackFramesPerSecond,
+      crop: true,
+    });
+    const sortedImages = await findImagesInDir(tempFolder.name);
+    const bar = new ProgressBar('Searching for black frames [:bar] :rate/fps :percent :etas', {
+      complete: '=',
+      incomplete: ' ',
+      width: 20,
+      total: sortedImages.length,
+    });
     for (let i = 0; i < sortedImages.length; i += 1) {
       const imagePath = sortedImages[i];
       // eslint-disable-next-line no-await-in-loop
       const img = await Jimp.read(imagePath);
-      let isBlack = true;
+      let numberOfBlackFrames = 0;
       for (let x = 0; x < img.getWidth(); x += 1) {
-        const color = Jimp.intToRGBA(img.getPixelColor(x, img.getHeight() - 1));
-        if (color.r > colorThreshold || color.g > colorThreshold || color.b > colorThreshold) {
-          isBlack = false;
-          break;
+        for (let y = 0; y < img.getHeight(); y += 1) {
+          const color = Jimp.intToRGBA(img.getPixelColor(x, y));
+          if (
+            color.r < fullBlackColorThreshold
+            && color.g < fullBlackColorThreshold
+            && color.b < fullBlackColorThreshold
+          ) {
+            numberOfBlackFrames += 1;
+          }
         }
       }
-      if (isBlack) {
+      // bar.interrupt(`${numberOfBlackFrames}, ${img.getWidth() * img.getHeight() * threshold}`);
+      if (numberOfBlackFrames > img.getWidth() * img.getHeight() * threshold) {
         if (lastBlack === -1) {
-          console.log('\nFound potential start of the reaction');
           lastBlack = i;
         }
       } else if (lastBlack !== -1) {
-        if (i - lastBlack > minBlackFrames) {
-          result.push([lastBlack, i - 1]);
-          if (result.length === args.e.length) {
-            return result;
-          }
-        } else {
-          console.log('\nPotential reaction interval is too short, discarded');
-        }
-        lastBlack = -1;
+        return [
+          from + lastBlack / searchForBlackFramesPerSecond,
+          from + (i - 1) / searchForBlackFramesPerSecond,
+        ];
       }
-      bar.increment();
+      bar.tick();
     }
     if (lastBlack !== -1) {
-      result.push([lastBlack, sortedImages.length - 1]);
+      return [
+        from + lastBlack / searchForBlackFramesPerSecond,
+        from + (sortedImages.length - 1) / searchForBlackFramesPerSecond,
+      ];
     }
-    return result;
+    return [];
   } finally {
-    bar.stop();
+    tempFolder.removeCallback();
   }
 }
 
-function testInterval(video, episode, interval) {
+async function searchForCredits() { // returns frames
+  console.log('Checking for credits...');
+  return searchForBlackFrames(
+    minCreditsSearchSeconds,
+    maxCreditsSearchSeconds,
+    fullBlackCountThreshold,
+  );
+}
+
+async function getReactionTimeIntervals(youtubeIntervals) {
+  if (youtubeIntervals.length === 1) {
+    const creditsDelta = await searchForCredits();
+    const start = creditsDelta.length === 0 ? 0 : creditsDelta[1];
+    return [[start, -1]];
+  }
+  const tempFolder = tmp.dirSync();
+  const result = [];
+  const creditsDelta = await searchForCredits();
+  console.log(`credits: ${creditsDelta}`);
+  let prevStart = creditsDelta.length === 0 ? 0 : creditsDelta[1];
+  try {
+    for (let i = 0; i < youtubeIntervals.length; i += 1) {
+      console.log(`Getting reaction time interval ${i + 1}/${youtubeIntervals.length}`);
+      const ytInterval = youtubeIntervals[i];
+      const middle = ytInterval[1] - (ytInterval[0] - timerTime) + prevStart;
+      if (i !== youtubeIntervals.length - 1) {
+        // eslint-disable-next-line no-await-in-loop
+        const blackFrameInterval = await searchForBlackFrames(
+          middle - reactionFromYoutubeSafetySeconds,
+          middle + reactionFromYoutubeSafetySeconds,
+          fullBlackCountThreshold,
+        );
+        console.log(`${middle - reactionFromYoutubeSafetySeconds} - ${middle + reactionFromYoutubeSafetySeconds}`);
+        if (blackFrameInterval.length === 0) {
+          console.error(`Couldn't find reaction part #${i + 1}!`);
+          process.exit(1);
+        }
+        const [blackoutStart, blackoutFinish] = blackFrameInterval;
+        result.push([prevStart, blackoutStart]);
+        prevStart = blackoutFinish;
+      } else {
+        result.push([prevStart, -1]);
+      }
+    }
+    return result;
+  } finally {
+    tempFolder.removeCallback();
+  }
+}
+
+async function generateVideo(youtubeIntervals, reactionIntervals) {
   console.log('Generating video...');
-  const seconds = interval.map((it) => (it * frameInterval) / 1000);
-  return new Promise((res, rej) => {
-    const bar = new cliProgress.SingleBar({
-      hideCursor: true,
-    }, cliProgress.Presets.shades_classic);
-    bar.start(100);
+  for (let i = 0; i < youtubeIntervals.length; i += 1) {
+    if (!args.r || !fs.existsSync(path.join(args.o, `temp_part${i}.mp4`))) {
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((res, rej) => {
+        const bar = new ProgressBar(`Generating video part (${i + 1} / ${youtubeIntervals.length}) [:bar] :percent :etas`, {
+          complete: '=',
+          incomplete: ' ',
+          width: 20,
+          total: 100,
+        });
+        let lastPercentage = 0;
+        const c = 'PTS-STARTPTS';
+        const cBrackets = `(${c})`;
+        const seconds = youtubeIntervals[i];
+        const rInterval = reactionIntervals[i];
+        const next = youtubeIntervals[i + 1] || null;
+        const filters = (i === 0 ? [
+          `[0:v]trim=0:${seconds[0] - speedUpTime - zoomTime},setpts=${c}[before]`,
+          `[0:a]atrim=0:${seconds[0] - speedUpTime - zoomTime},asetpts=${c}[beforeA]`,
+        ] : []).concat([
+          `[0:v]trim=${seconds[0] - speedUpTime - zoomTime}:${seconds[0] - zoomTime},setpts=${1 / speedUpFactor}*${cBrackets}[speedUp]`,
+          `[0:v]trim=${seconds[0] - zoomTime}:${seconds[0] + zoomLateTime},scale=${zoomFactor}*iw:-1,crop=iw/${zoomFactor}:ih/${zoomFactor},setpts=${zoomSlowFactor}*${cBrackets}[zoom]`,
+          `[1:v]trim=start=${rInterval[0]}${rInterval[1] === -1 ? '' : `:end=${rInterval[1]}`},scale=${expectedSize[0]}:${expectedSize[1]},setpts=${c}[reaction]`,
+          next === null ? `[0:v]trim=start=${seconds[1]},setpts=${c}[after]` : `[0:v]trim=${seconds[1]}:${next[0] - speedUpTime - zoomTime},setpts=${c}[after]`,
+          // audio
+          `[0:a]atrim=${seconds[0] - speedUpTime - zoomTime}:${seconds[0] - zoomTime},asetpts=${c},atempo=${speedUpFactor}[speedUpA]`,
+          `[0:a]atrim=${seconds[0] - zoomTime}:${seconds[0] + zoomLateTime},asetpts=${c},atempo=${Math.max(0.5, 1 / zoomSlowFactor)}[zoomA]`,
+          `[1:a]atrim=start=${rInterval[0]}${rInterval[1] === -1 ? '' : `:end=${rInterval[1]}`},asetpts=${c}[reactionA]`,
+          next === null ? `[0:a]atrim=start=${seconds[1]},asetpts=${c}[afterA]` : `[0:a]atrim=${seconds[1]}:${next[0] - speedUpTime - zoomTime},asetpts=${c}[afterA]`,
+        ]);
+        const outputs = (i === 0 ? [
+          'before', 'beforeA',
+        ] : []).concat([
+          'speedUp', 'speedUpA',
+          'zoom', 'zoomA',
+          'reaction', 'reactionA',
+          'after', 'afterA',
+        ]);
+        const prefix = outputs.map((it) => `[${it}]`).join('');
+        filters.push(`${prefix}concat=n=${Math.round(outputs.length / 2)}:v=1:a=1[output]`);
+        ffmpeg(args.tee, {
+          // stdoutLines: Infinity,
+        })
+          .input(args.e)
+          .complexFilter(filters, 'output')
+          .outputOptions([
+            // `-ss ${seconds[0] - speedUpTime - zoomTime - 5}`,
+            // '-t 30',
+            '-y',
+          ])
+          .on('start', (commandLine) => {
+            console.log(`\n${commandLine}\n`);
+          })
+          .on('end', res)
+          .on('error', rej)
+          .on('progress', (info) => {
+            const ceiledPercent = Math.ceil(info.percent);
+            if (ceiledPercent !== lastPercentage) {
+              lastPercentage = ceiledPercent;
+              bar.tick();
+            }
+          })
+          // .on('end', (stdout, stderr) => {
+          //   console.log(stdout);
+          //   console.log(stderr);
+          // })
+          .save(path.join(args.o, `temp_part${i}.mp4`));
+      });
+    }
+  }
+  await writeFile(path.join(args.o, 'concat_list_temp.txt'), [...Array(youtubeIntervals.length).keys()].map(
+    (it) => `file 'temp_part${it}.mp4'`,
+  ).join('\n'));
+  await new Promise((res, rej) => {
+    const bar = new ProgressBar('Concatenating parts [:bar] :percent :etas', {
+      complete: '=',
+      incomplete: ' ',
+      width: 20,
+      total: 100,
+    });
     let lastPercentage = 0;
-    const c = 'PTS-STARTPTS';
-    const cBrackets = `(${c})`;
-    ffmpeg(video, {
+    ffmpeg(path.join(args.o, 'concat_list_temp.txt'), {
       // stdoutLines: Infinity,
     })
-      .input(episode)
-      .complexFilter([
-        `[0:v]trim=0:${seconds[0] - speedUpTime - zoomTime},setpts=${c}[before]`,
-        `[0:v]trim=${seconds[0] - speedUpTime - zoomTime}:${seconds[0] - zoomTime},setpts=${1 / speedUpFactor}*${cBrackets}[speedUp]`,
-        `[0:v]trim=${seconds[0] - zoomTime}:${seconds[0] + zoomLateTime},scale=${zoomFactor}*iw:-1,crop=iw/${zoomFactor}:ih/${zoomFactor},setpts=${zoomSlowFactor}*${cBrackets}[zoom]`,
-        `[1:v]scale=${expectedSize[0]}:${expectedSize[1]},setpts=${c}[reaction]`,
-        `[0:v]trim=start=${seconds[1]},setpts=${c}[after]`,
-        `[0:a]atrim=0:${seconds[0] - speedUpTime - zoomTime},asetpts=${c}[beforeA]`,
-        `[0:a]atrim=${seconds[0] - speedUpTime - zoomTime}:${seconds[0] - zoomTime},asetpts=${c},atempo=${speedUpFactor}[speedUpA]`,
-        `[0:a]atrim=${seconds[0] - zoomTime}:${seconds[0] + zoomLateTime},asetpts=${c},atempo=${Math.max(0.5, 1 / zoomSlowFactor)}[zoomA]`,
-        `[1:a]asetpts=${c}[reactionA]`,
-        `[0:a]atrim=start=${seconds[1]},asetpts=${c}[afterA]`,
-        '[before][beforeA][speedUp][speedUpA][zoom][zoomA][reaction][reactionA][after][afterA]concat=n=5:v=1:a=1[output]',
-      ], 'output')
-      .outputOptions([
-        // `-ss ${seconds[0] - speedUpTime - zoomTime - 5}`,
-        // '-t 30',
-        '-threads 8',
+      .inputOptions([
+        '-safe 0',
+        '-f concat',
         '-y',
       ])
+      .outputOptions([
+        '-c copy',
+      ])
       .on('start', (commandLine) => {
-        console.error(`\n${commandLine}\n`);
+        console.log(`\n${commandLine}\n`);
       })
-      .on('end', () => {
-        bar.stop();
-        res();
-      })
+      .on('end', res)
+      .on('error', rej)
       .on('progress', (info) => {
         const ceiledPercent = Math.ceil(info.percent);
         if (ceiledPercent !== lastPercentage) {
           lastPercentage = ceiledPercent;
-          bar.increment();
+          bar.tick();
         }
       })
-      .on('error', (e) => {
-        bar.stop();
-        rej(e);
-      })
-      // .on('end', (stdout, stderr) => {
-      //   console.log(stdout);
-      //   console.log(stderr);
-      // })
-      .save('test.mp4');
+      .save(path.join(args.o, 'full.mp4'));
   });
+  console.log('Cleaning up...');
+  [...Array(youtubeIntervals.length).keys()].forEach((it) => {
+    fs.unlinkSync(path.join(args.o, `temp_part${it}.mp4`));
+  });
+  fs.unlinkSync(path.join(args.o, 'concat_list_temp.txt'));
 }
 
 (async () => {
-  const tmpFolder = tmp.dirSync();
-  const tmpFolderPath = args.dir ? args.dir : tmpFolder.name;
+  const youtubeTempFolder = tmp.dirSync();
+  const youtubeTempFolderPath = args.dir ? args.dir : youtubeTempFolder.name;
   try {
-    const images = await findImagesInDir(tmpFolderPath);
-    if (images.length === 0) {
-      await extractThumbnails(tmpFolderPath, args.tee);
+    // youtube
+    const youtubeImages = await findImagesInDir(youtubeTempFolderPath);
+    if (youtubeImages.length === 0) {
+      await extractThumbnails(youtubeTempFolderPath, args.tee, {
+        crop: true,
+      });
     }
-    const intervals = await getReactionIntervals(tmpFolderPath);
-    console.log(intervals);
-    await testInterval(args.tee, args.e[0], intervals[0]);
+    const youtubeIntervals = await getYoutubeIntervals(youtubeTempFolderPath);
+    console.log(youtubeIntervals);
+    // reaction
+    const reactionIntervals = await getReactionTimeIntervals(youtubeIntervals);
+    if (reactionIntervals.length !== youtubeIntervals.length) {
+      console.error(`Reaction intervals count (${reactionIntervals.length}) is not the same as youtube count (${youtubeIntervals.length})`);
+      process.exit(1);
+    }
+    await generateVideo(youtubeIntervals, reactionIntervals);
   } catch (e) {
     console.error(e);
   } finally {
-    tmpFolder.removeCallback();
+    youtubeTempFolder.removeCallback();
   }
 })().finally(() => {
   //
