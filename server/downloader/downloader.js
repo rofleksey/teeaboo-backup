@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 const axios = require('axios');
 const path = require('path');
 const youtubedl = require('youtube-dl');
@@ -5,22 +6,46 @@ const getUrls = require('get-urls');
 const cheerio = require('cheerio');
 const download = require('download');
 
-const apiKey = process.env.YOUTUBE_API_KEY;
+const apiKey = process.env.YOUTUBE_API_KEY || '';
 const apiPrefix = 'https://www.googleapis.com/youtube/v3/';
 const channelId = 'UCcAJb3qfTvEZdDl6tOv0nfA';
 
 // QRajskbC-BQ
 
-async function listCommand() {
-  const response = await axios.get(`${apiPrefix}search?key=${apiKey}&channelId=${channelId}&part=snippet,id&order=date&maxResults=50`);
-  console.log(JSON.stringify(response.data, null, 1));
+async function listCommand(count) {
+  const response = await axios.get(`${apiPrefix}search?key=${apiKey}&channelId=${channelId}&part=snippet,id&order=date&maxResults=${count}`);
+  process.send({
+    result: response.data,
+  });
+  console.log(`Retreived ${response.data.items ? response.data.items.length : 'unknown number of'} items!`);
 }
 
-async function downloadYoutube(url, output) {
+async function downloadYoutube(id, output) {
+  process.send({
+    status: 'Downloading youtube thumbnail...',
+  });
+  await new Promise((res, rej) => {
+    console.log('Downloading youtube thumbnail...');
+    youtubedl.exec(
+      `https://www.youtube.com/watch?v=${id}`,
+      ['--write-thumbnail', '--skip-download', '--output', path.join(output, 'thumbnail.jpg')],
+      {},
+      (err, msg) => {
+        if (err) {
+          rej(err);
+        }
+        console.log(msg.join('\n'));
+        res();
+      },
+    );
+  });
+  process.send({
+    status: 'Downloading youtube video...',
+  });
   await new Promise((res, rej) => {
     console.log('Downloading youtube video...');
     youtubedl.exec(
-      url,
+      `https://www.youtube.com/watch?v=${id}`,
       ['-f', 'bestvideo[height>=720]+bestaudio[ext=m4a]', '--output', path.join(output, 'youtube.mp4')],
       {},
       (err, msg) => {
@@ -35,11 +60,16 @@ async function downloadYoutube(url, output) {
 }
 
 async function downloadBitchute(url, output) {
+  process.send({
+    status: 'Downloading bitchute video...',
+  });
   console.log('Downloading bitchute video...');
   const response = await axios.get(url);
   const $ = cheerio.load(response.data);
   const downloadUrl = $('video source').attr('src');
-  await download(downloadUrl, output);
+  await download(downloadUrl, output, {
+    filename: 'bitchute.mp4',
+  });
 }
 
 function getVideoIdFromLink(url) {
@@ -49,17 +79,16 @@ function getVideoIdFromLink(url) {
 }
 
 
-async function extractLinks(url) {
-  const id = getVideoIdFromLink(url);
+async function extractLinks(id) {
   const response = await axios.get(`${apiPrefix}videos?key=${apiKey}&id=${id}&part=snippet`);
   const { description } = response.data.items[0].snippet;
   const urlsSet = getUrls(description);
   return Array.from(urlsSet);
 }
 
-async function videoCommand(url, output) {
-  await downloadYoutube(url, output);
-  const links = await extractLinks(url);
+async function videoCommand(id, output) {
+  await downloadYoutube(id, output);
+  const links = await extractLinks(id);
   // eslint-disable-next-line no-restricted-syntax
   for (const link of links) {
     if (link.includes('bitchute')) {
@@ -89,22 +118,31 @@ function axiosErrorCatcher(e) {
     // Something happened in setting up the request that triggered an Error
     console.error('Error', e.message);
   }
+  process.exit(1);
   // console.error(e.config);
 }
 
 function simpleErrorCatcher(e) {
   console.error(e);
+  process.exit(1);
 }
 
-require('yargs')
+const { argv } = require('yargs')
   .scriptName('downloader')
-  .command('list', 'get list of videos', () => { }, (argv) => {
-    listCommand(argv.id).catch(axiosErrorCatcher);
-  })
-  .command('video <url> <output>', 'download target video', (yargs) => {
+  .command('list <count>', 'get list of videos', (yargs) => {
     yargs
-      .positional('url', {
-        describe: 'url of the video to crawl',
+      .positional('count', {
+        describe: 'number of videos to retreive',
+        type: 'number',
+        demandOption: true,
+      });
+  }, (args) => {
+    listCommand(args.count).catch(axiosErrorCatcher);
+  })
+  .command('video <id> <output>', 'download target video', (yargs) => {
+    yargs
+      .positional('id', {
+        describe: 'id of the video to crawl',
         type: 'string',
         demandOption: true,
       })
@@ -113,8 +151,8 @@ require('yargs')
         type: 'string',
         demandOption: true,
       });
-  }, (argv) => {
-    videoCommand(argv.url, argv.output).catch(simpleErrorCatcher);
+  }, (args) => {
+    videoCommand(args.id, args.output).catch(simpleErrorCatcher);
   })
   // .command('playlist <url>', 'crawl target playlist', (yargs) => {
   //   yargs

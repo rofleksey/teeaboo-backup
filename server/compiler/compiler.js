@@ -1,7 +1,6 @@
 const ffmpeg = require('fluent-ffmpeg');
 const tmp = require('tmp');
 const Jimp = require('jimp');
-const ProgressBar = require('progress');
 
 const { promisify } = require('util');
 const fs = require('fs');
@@ -61,14 +60,7 @@ const args = require('yargs')
 function extractThumbnails(folder, video, opts) {
   console.log('Extracting thumbnails...');
   const options = opts || {};
-  console.log(options);
   return new Promise((res, rej) => {
-    const bar = new ProgressBar('extracting thumbnails [:bar] :percent :etas', {
-      complete: '=',
-      incomplete: ' ',
-      width: 20,
-      total: 100,
-    });
     let lastPercentage = 0;
     let command = ffmpeg(video, {
       // stdoutLines: Infinity,
@@ -90,7 +82,6 @@ function extractThumbnails(folder, video, opts) {
         const ceiledPercent = Math.ceil(info.percent);
         if (ceiledPercent !== lastPercentage) {
           lastPercentage = ceiledPercent;
-          bar.tick();
         }
       })
       // .on('end', (stdout, stderr) => {
@@ -133,12 +124,6 @@ async function getYoutubeIntervals(folder) {
   const sortedImages = await findImagesInDir(folder);
   const result = [];
   let lastBlack = -1;
-  const bar = new ProgressBar('Getting youtube intervals [:bar] :rate/fps :percent :etas', {
-    complete: '=',
-    incomplete: ' ',
-    width: 20,
-    total: sortedImages.length,
-  });
 
   for (let i = 0; i < sortedImages.length; i += 1) {
     const imagePath = sortedImages[i];
@@ -154,18 +139,17 @@ async function getYoutubeIntervals(folder) {
     }
     if (isBlack) {
       if (lastBlack === -1) {
-        bar.interrupt('Found potential start of the reaction');
+        console.log('Found potential start of the reaction');
         lastBlack = i;
       }
     } else if (lastBlack !== -1) {
       if (i - lastBlack > minBlackFrames) {
         result.push([lastBlack / framesPerSecond, (i - 1) / framesPerSecond]);
       } else {
-        bar.interrupt('Potential reaction interval is too short, discarded');
+        console.log('Potential reaction interval is too short, discarded');
       }
       lastBlack = -1;
     }
-    bar.tick();
   }
   if (lastBlack !== -1) {
     result.push([lastBlack / framesPerSecond, (sortedImages.length - 1) / framesPerSecond]);
@@ -185,12 +169,6 @@ async function searchForBlackFrames(from, to, threshold) {
       crop: true,
     });
     const sortedImages = await findImagesInDir(tempFolder.name);
-    const bar = new ProgressBar('Searching for black frames [:bar] :rate/fps :percent :etas', {
-      complete: '=',
-      incomplete: ' ',
-      width: 20,
-      total: sortedImages.length,
-    });
     for (let i = 0; i < sortedImages.length; i += 1) {
       const imagePath = sortedImages[i];
       // eslint-disable-next-line no-await-in-loop
@@ -208,7 +186,6 @@ async function searchForBlackFrames(from, to, threshold) {
           }
         }
       }
-      // bar.interrupt(`${numberOfBlackFrames}, ${img.getWidth() * img.getHeight() * threshold}`);
       if (numberOfBlackFrames > img.getWidth() * img.getHeight() * threshold) {
         if (lastBlack === -1) {
           lastBlack = i;
@@ -219,7 +196,6 @@ async function searchForBlackFrames(from, to, threshold) {
           from + (i - 1) / searchForBlackFramesPerSecond,
         ];
       }
-      bar.tick();
     }
     if (lastBlack !== -1) {
       return [
@@ -289,12 +265,6 @@ async function generateVideo(youtubeIntervals, reactionIntervals) {
     if (!fs.existsSync(path.join(args.o, `temp_part${i}.mp4`))) {
       // eslint-disable-next-line no-await-in-loop
       await new Promise((res, rej) => {
-        const bar = new ProgressBar(`Generating video part (${i + 1} / ${youtubeIntervals.length}) [:bar] :percent :etas`, {
-          complete: '=',
-          incomplete: ' ',
-          width: 20,
-          total: 100,
-        });
         let lastPercentage = 0;
         const c = 'PTS-STARTPTS';
         const cBrackets = `(${c})`;
@@ -344,7 +314,9 @@ async function generateVideo(youtubeIntervals, reactionIntervals) {
             const ceiledPercent = Math.ceil(info.percent);
             if (ceiledPercent !== lastPercentage) {
               lastPercentage = ceiledPercent;
-              bar.tick();
+              process.send({
+                status: `Generating part ${i + 1}/${youtubeIntervals.length} (${lastPercentage}%)...`,
+              });
             }
           })
           // .on('end', (stdout, stderr) => {
@@ -359,12 +331,6 @@ async function generateVideo(youtubeIntervals, reactionIntervals) {
     (it) => `file 'temp_part${it}.mp4'`,
   ).join('\n'));
   await new Promise((res, rej) => {
-    const bar = new ProgressBar('Concatenating parts [:bar] :percent :etas', {
-      complete: '=',
-      incomplete: ' ',
-      width: 20,
-      total: 100,
-    });
     let lastPercentage = 0;
     ffmpeg(path.join(args.o, 'concat_list_temp.txt'), {
       // stdoutLines: Infinity,
@@ -387,7 +353,6 @@ async function generateVideo(youtubeIntervals, reactionIntervals) {
         const ceiledPercent = Math.ceil(info.percent);
         if (ceiledPercent !== lastPercentage) {
           lastPercentage = ceiledPercent;
-          bar.tick();
         }
       })
       .save(path.join(args.o, 'full.mp4'));
@@ -423,6 +388,9 @@ async function determineTeeSize() {
   const youtubeTempFolder = tmp.dirSync();
   const youtubeTempFolderPath = youtubeTempFolder.name;
   try {
+    process.send({
+      status: 'Analyzing videos...',
+    });
     await determineTeeSize();
     // youtube
     const youtubeImages = await findImagesInDir(youtubeTempFolderPath);
@@ -439,6 +407,9 @@ async function determineTeeSize() {
       console.error(`Reaction intervals count (${reactionIntervals.length}) is not the same as youtube count (${youtubeIntervals.length})`);
       process.exit(1);
     }
+    process.send({
+      status: 'Generating video...',
+    });
     await generateVideo(youtubeIntervals, reactionIntervals);
   } catch (e) {
     console.error(e);

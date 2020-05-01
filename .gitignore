@@ -26,3 +26,4 @@ yarn-error.log*
 /server/compiler/test.mp4
 output
 log.txt
+/data
