@@ -1,0 +1,23 @@
+.DS_Store
+node_modules
+**/node_modules
+.git
+src
+
+# Editor directories and files
+.idea
+.vscode
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# tee
+**/test-samples
+**/temp
+**/test.mp4
+**/output
+**/log.txt
+data
+deploy.sh

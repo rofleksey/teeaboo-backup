@@ -1,6 +1,20 @@
 <template>
-  <v-container>
-    <v-list align="center" two-line max-width="800">
+  <v-container align="center">
+    <v-container>
+      <div>
+        Cpu usage ({{cpuUsage}}%)
+        <v-progress-linear :value="cpuUsage"></v-progress-linear>
+      </div>
+      <div v-if="memInfo">
+        Mem usage ({{memInfo.usedMemMb}} / {{memInfo.totalMemMb}} Mb)
+        <v-progress-linear :value="100 - memInfo.freeMemPercentage"></v-progress-linear>
+      </div>
+      <div v-if="driveInfo">
+        Disk usage ({{driveInfo.usedGb}} / {{driveInfo.totalGb}} Gb)
+        <v-progress-linear :value="driveInfo.usedPercentage"></v-progress-linear>
+      </div>
+    </v-container>
+    <v-list align="center" two-line max-width="1000">
       <template v-for="(item, index) in tasks">
         <v-list-item
           :style="{'background-color': item.color}"
@@ -44,44 +58,98 @@
 </template>
 
 <script>
+import axios from 'axios';
+
+const POLL_INTERVAL = 15 * 1000;
+const INFO_POLL_INTERVAL = 10 * 1000;
+
 export default {
   name: 'QueueList',
   computed: {},
+  mounted() {
+    const poll = () => {
+      axios.get('/api/queue').then((res) => {
+        const { array } = res.data;
+        this.tasks = array.map((task) => {
+          let icon = 'mdi-question-mark';
+          let color = 'black';
+          if (task.status === 'pending') {
+            icon = 'mdi-timer-sand';
+            color = 'gray';
+          } else if (task.status === 'ready') {
+            icon = 'mdi-check';
+            color = 'green';
+          } else if (task.status === 'error') {
+            icon = 'mdi-bug';
+            color = 'red';
+          } else if (task.status === 'processing') {
+            icon = 'mdi-cog';
+            color = 'purple';
+          }
+          return ({
+            ...task,
+            icon,
+            color,
+          });
+        }).reverse();
+      });
+    };
+    poll();
+    this.intervalId = setInterval(poll, POLL_INTERVAL);
+    const pollInfo = () => {
+      axios.get('/api/info').then((res) => {
+        const { cpuUsage, memInfo, driveInfo } = res.data;
+        this.cpuUsage = cpuUsage;
+        this.memInfo = memInfo;
+        this.driveInfo = driveInfo;
+      });
+    };
+    pollInfo();
+    this.infoIntervalId = setInterval(pollInfo, INFO_POLL_INTERVAL);
+  },
+  unmounted() {
+    clearInterval(this.intervalId);
+    clearInterval(this.infoIntervalId);
+  },
   data: () => ({
-    pointer: 1,
+    intervalId: undefined,
+    infoIntervalId: undefined,
+    cpuUsage: 0,
+    driveInfo: null,
+    memInfo: null,
     tasks: [
-      {
-        name: 'Teeaboo Reacts - Flip Flappers Episode 100 - Pending',
-        statusText: 'Pending',
-        status: 'pending',
-        time: '1 month ago',
-        icon: 'mdi-timer-sand',
-        color: 'gray',
-      },
-      {
-        name: 'Teeaboo Reacts - Flip Flappers Episode 7 - Disillusioned',
-        statusText: 'Generating video...',
-        status: 'processing',
-        time: '15 min ago',
-        icon: 'mdi-cog',
-        color: 'purple',
-      },
-      {
-        name: 'Teeaboo Reacts - Flip Flappers Episode 9 - Test',
-        statusText: 'Ready',
-        status: 'ready',
-        time: '1 day ago',
-        icon: 'mdi-check',
-        color: 'green',
-      },
-      {
-        name: 'Teeaboo Reacts - Flip Flappers Episode 10 - Error',
-        statusText: 'Array index out of bounds',
-        status: 'error',
-        time: '2 days ago',
-        icon: 'mdi-bug',
-        color: 'red',
-      },
+      // {
+      //   name: 'Teeaboo Reacts - Flip Flappers Episode 100 - Pending',
+      //   statusText: 'Pending',
+      //   status: 'pending',
+      //   time: '1 month ago',
+      //   icon: 'mdi-timer-sand',
+      //   color: 'gray',
+      // },
+      // {
+      //   name: 'Teeaboo Reacts - Flip Flappers Episode 7 - Disillusioned',
+      //   statusText: 'Generating video...',
+      //   status: 'processing',
+      //   time: '15 min ago',
+      //   icon: 'mdi-cog',
+      //   color: 'purple',
+      // },
+      // {
+      //   name: 'Teeaboo Reacts - Flip Flappers Episode 9 - Test',
+      //   statusText: 'Ready',
+      //   status: 'ready',
+      //   time: '1 day ago',
+      //   icon: 'mdi-check',
+      //   color: 'green',
+      // },
+      // {
+      //   name: 'Teeaboo Reacts - Flip Flappers Episode 10 - Error',
+      //   statusText: 'Array index out of bounds',
+      //   status: 'error',
+      //   time: '2 days ago',
+      //   icon: 'mdi-bug',
+      //   color: 'red',
+      // },
     ],
   }),
 };

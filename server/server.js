@@ -9,6 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const util = require('util');
 const { fork } = require('child_process');
+const { drive, mem, cpu } = require('node-os-utils');
 
 const exists = util.promisify(fs.exists);
 const mkdir = util.promisify(fs.mkdir);
@@ -18,9 +19,15 @@ const writeFile = util.promisify(fs.writeFile);
 const app = express();
 const port = 2020;
 const VIDEO_CHECK_INTERVAL = 1000 * 60 * 30;
-const VIDEO_HISTORY_SIZE = 10;
-const NAMESPACE = 'Teeaboo';
+const VIDEO_HISTORY_SIZE = 15;
+const NAMESPACE = 'd9d88ddb-af7e-4e34-83bb-dafc12f56b47';
 const DATA_DIR = '../data';
+const INFO_UPDATE_INTERVAL = 4 * 1000;
+
+let cpuUsage = 0;
+let driveInfo = 0;
+let memInfo = 0;
+let lastInfoUpdate = 0;
 
 TimeAgo.addLocale(TimeAgoEn);
 const timeAgo = new TimeAgo('en-US');
@@ -160,6 +167,7 @@ async function executeTask(task) {
       if (!await exists(videoDir)) {
         await mkdir(videoDir);
       }
+      video.thumbnail = path.join(videoDir, 'thumbnail.jpg');
       console.log(`Downloading ${task.name}...`);
       const { code: downloaderCode } = await runExternalNode(
         'Downloader',
@@ -172,7 +180,6 @@ async function executeTask(task) {
       } else {
         throw new Error(`Failed to download ${task.name}!`);
       }
-      video.thumbnail = path.join(videoDir, 'thumbnail.jpg');
       console.log(`Compiling ${task.name}...`);
       const youtubeVideo = path.join(videoDir, 'youtube.mp4');
       const bitchuteVideo = path.join(videoDir, 'bitchute.mp4');
@@ -241,7 +248,8 @@ async function mainLoop() {
 
 app.get('/api/videos', async (req, res) => {
   try {
-    res.status(200).end(videos.map((v) => ({ ...v, time: timeAgo.format(v.time || 0) })));
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify(videos.map((v) => ({ ...v, time: timeAgo.format(v.time || 0) }))));
   } catch (e) {
     console.error(e);
     res.status(500).end();
@@ -250,10 +258,41 @@ app.get('/api/videos', async (req, res) => {
 
 app.get('/api/queue', async (req, res) => {
   try {
-    res.status(200).end({
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({
       array: queue.array.map((t) => ({ ...t, time: timeAgo.format(t.time || 0) })),
       pointer: queue.pointer,
-    });
+    }));
+  } catch (e) {
+    console.error(e);
+    res.status(500).end();
+  }
+});
+
+app.get('/api/info', async (req, res) => {
+  try {
+    if (Date.now() - lastInfoUpdate > INFO_UPDATE_INTERVAL) {
+      [cpuUsage, driveInfo, memInfo] = await Promise.all([cpu.usage(), drive.info(), mem.info()]);
+      lastInfoUpdate = Date.now();
+    }
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({
+      cpuUsage,
+      driveInfo,
+      memInfo,
+    }));
+  } catch (e) {
+    console.error(e);
+    res.status(500).end();
+  }
+});
+
+app.post('/api/admin', async (req, res) => {
+  try {
+    // res.status(200).end({
+    //   array: queue.array.map((t) => ({ ...t, time: timeAgo.format(t.time || 0) })),
+    //   pointer: queue.pointer,
+    // });
   } catch (e) {
     console.error(e);
     res.status(500).end();

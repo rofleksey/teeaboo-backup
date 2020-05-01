@@ -15,6 +15,11 @@ const routes = [
     name: 'Queue',
     component: () => import(/* webpackChunkName: "about" */ '../views/QueueList.vue'),
   },
+  {
+    path: '/watch/:id',
+    name: 'Watch',
+    component: () => import(/* webpackChunkName: "about" */ '../views/VideoPage.vue'),
+  },
 ];
 
 const router = new VueRouter({

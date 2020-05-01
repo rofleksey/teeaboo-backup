@@ -151,9 +151,6 @@ async function getYoutubeIntervals(folder) {
       lastBlack = -1;
     }
   }
-  if (lastBlack !== -1) {
-    result.push([lastBlack / framesPerSecond, (sortedImages.length - 1) / framesPerSecond]);
-  }
   return result;
 }
 
@@ -413,9 +410,11 @@ async function determineTeeSize() {
     await generateVideo(youtubeIntervals, reactionIntervals);
   } catch (e) {
     console.error(e);
+    process.exit(1);
   } finally {
     youtubeTempFolder.removeCallback();
   }
-})().finally(() => {
-  //
+})().catch((e) => {
+  console.error(e);
+  process.exit(1);
 });

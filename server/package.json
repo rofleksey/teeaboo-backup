@@ -13,8 +13,18 @@
     "body-parser": "^1.19.0",
     "express": "^4.17.1",
     "javascript-time-ago": "^2.0.7",
+    "node-os-utils": "^1.2.2",
     "sanitize-filename": "^1.6.3",
     "uuid": "^8.0.0",
-    "vue-recyclerview": "^0.4.1"
+    "fluent-ffmpeg": "^2.1.2",
+    "jimp": "^0.10.2",
+    "tmp": "^0.1.0",
+    "yargs": "^15.3.1",
+    "progress": "^2.0.3",
+    "axios": "^0.19.2",
+    "cheerio": "^1.0.0-rc.3",
+    "download": "^8.0.0",
+    "get-urls": "^9.2.0",
+    "youtube-dl": "^3.0.2"
   }
 }

@@ -27,3 +27,4 @@ yarn-error.log*
 output
 log.txt
 /data
+deploy.sh
