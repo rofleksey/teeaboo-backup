@@ -46,7 +46,7 @@ async function downloadYoutube(id, output) {
     console.log('Downloading youtube video...');
     youtubedl.exec(
       `https://www.youtube.com/watch?v=${id}`,
-      ['-f', 'bestvideo[height>=720]+bestaudio[ext=m4a]', '--output', path.join(output, 'youtube.mp4')],
+      ['-f', 'bestvideo+bestaudio[ext=m4a]/bestvideo+bestaudio/best', '--merge-output-format', 'mp4', '--output', path.join(output, 'youtube.mp4')],
       {},
       (err, msg) => {
         if (err) {
@@ -118,13 +118,21 @@ function axiosErrorCatcher(e) {
     // Something happened in setting up the request that triggered an Error
     console.error('Error', e.message);
   }
-  process.exit(1);
+  process.send({
+    error: 'connection error in downloader module',
+  }, () => {
+    process.exit(1);
+  });
   // console.error(e.config);
 }
 
 function simpleErrorCatcher(e) {
   console.error(e);
-  process.exit(1);
+  process.send({
+    error: e.toString(),
+  }, () => {
+    process.exit(1);
+  });
 }
 
 const { argv } = require('yargs')

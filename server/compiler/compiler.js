@@ -410,11 +410,19 @@ async function determineTeeSize() {
     await generateVideo(youtubeIntervals, reactionIntervals);
   } catch (e) {
     console.error(e);
-    process.exit(1);
+    process.send({
+      error: e.toString(),
+    }, () => {
+      process.exit(1);
+    });
   } finally {
     youtubeTempFolder.removeCallback();
   }
 })().catch((e) => {
   console.error(e);
-  process.exit(1);
+  process.send({
+    error: e.toString(),
+  }, () => {
+    process.exit(1);
+  });
 });

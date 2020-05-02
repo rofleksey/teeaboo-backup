@@ -112,7 +112,6 @@ async function checkVideos() {
         try {
           if (
             queue.array.findIndex((task) => task.id === item.id.videoId) < 0
-            && videos.findIndex((v) => v.id === item.id.videoId) < 0
           ) {
             queue.array.push({
               type: 'youtube',
@@ -144,6 +143,12 @@ function messagesHandler(task, video) {
       console.log(`Received status '${message.status}' for task ${taskArg.name}`);
       taskArg.statusText = message.status;
       videoArg.statusText = message.status;
+    } else if (message.error) {
+      console.warn(`Error for task ${taskArg.name}: ${message.error}`);
+      videoArg.statusText = 'Error occured :(';
+      videoArg.status = 'error';
+      taskArg.statusText = message.error;
+      taskArg.status = 'error';
     }
   };
 }
@@ -153,14 +158,22 @@ async function executeTask(task) {
   if (task.type === 'youtube') {
     curTask.status = 'processing';
     curTask.statusText = 'Initializing...';
-    const video = {
+    curTask.time = Date.now();
+    const oldVideo = videos.find((v) => v.id === task.id);
+    const video = oldVideo || {
       name: task.name,
       id: task.id,
       status: 'processing',
       statusText: 'Initializing...',
-      date: Date.now(),
+      time: Date.now(),
     };
-    videos.push(video);
+    if (!oldVideo) {
+      videos.push(video);
+    } else {
+      video.status = 'processing';
+      video.statusText = 'Reinitializing...';
+      video.time = Date.now();
+    }
     try {
       const actualFolderName = uuidv5(task.name, NAMESPACE);
       const videoDir = path.join(DATA_DIR, actualFolderName);
@@ -203,10 +216,14 @@ async function executeTask(task) {
       curTask.statusText = 'Ready!';
     } catch (e) {
       console.warn(`Failed to process task ${task.name}: ${e}`);
-      video.status = 'error';
-      video.statusText = 'Error occured :(';
-      curTask.status = 'error';
-      curTask.statusText = e.toString();
+      if (video.status !== 'error') {
+        video.status = 'error';
+        video.statusText = 'Error occured :(';
+      }
+      if (curTask.status !== 'error') {
+        curTask.status = 'error';
+        curTask.statusText = e.toString();
+      }
     } finally {
       video.time = Date.now();
       curTask.time = Date.now();
@@ -224,6 +241,7 @@ async function mainLoop() {
     array: [],
     pointer: 0,
   });
+  queue.pointer = 0;
   videos = await loadObjectFromFile('videos.json', []);
   checkVideos().catch((e) => {
     console.error(e);
@@ -233,8 +251,12 @@ async function mainLoop() {
     if (queue.pointer < queue.array.length) {
       const task = queue.array[queue.pointer];
       try {
-        await executeTask(task);
-        console.log(`Task finished! ${queue.array.length - queue.pointer - 1} remaining`);
+        if (task.status !== 'ready') {
+          await executeTask(task);
+          console.log(`Task finished! ${queue.array.length - queue.pointer - 1} remaining`);
+        } else {
+          console.log(`Task is already finished! ${queue.array.length - queue.pointer - 1} remaining`);
+        }
       } catch (e) {
         console.error(e);
       } finally {

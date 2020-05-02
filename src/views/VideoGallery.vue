@@ -8,9 +8,9 @@
         class="ml-left lg">
         <v-card
         color="#303034"
-        :to="`/watch/${video.folder}`"
         :class="(video.status && video.status==='error') ? 'error-vid' : ''"
         :hover="true"
+        :to="`/watch/${video.folder}`"
         :loading="(video.status && video.status==='processing') ? '#296c08' : false"
         :disabled="video.status && (video.status==='processing' || video.status==='error')"
         loader-height="7">
@@ -39,6 +39,7 @@
             <v-btn
               icon
               :disabled='!video.link'
+              :to="undefined"
               :href='video.link'>
               <v-icon>mdi-download</v-icon>
             </v-btn>
