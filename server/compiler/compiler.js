@@ -24,7 +24,7 @@ const reactionFromYoutubeSafetySeconds = 15;
 
 const [cropW, cropH, cropOffsetX, cropOffsetY] = [100, 3, 10, 10];
 const timerTime = 5;
-const speedUpTime = 15;
+const speedUpTime = 20;
 const speedUpFactor = 8;
 const zoomTime = 2;
 const zoomLateTime = 1;
@@ -259,70 +259,68 @@ async function getReactionTimeIntervals(youtubeIntervals) {
 async function generateVideo(youtubeIntervals, reactionIntervals) {
   console.log('Generating video...');
   for (let i = 0; i < youtubeIntervals.length; i += 1) {
-    if (!fs.existsSync(path.join(args.o, `temp_part${i}.mp4`))) {
-      // eslint-disable-next-line no-await-in-loop
-      await new Promise((res, rej) => {
-        let lastPercentage = 0;
-        const c = 'PTS-STARTPTS';
-        const cBrackets = `(${c})`;
-        const seconds = youtubeIntervals[i];
-        const rInterval = reactionIntervals[i];
-        const next = youtubeIntervals[i + 1] || null;
-        const filters = (i === 0 ? [
-          `[0:v]trim=0:${seconds[0] - speedUpTime - zoomTime},setpts=${c}[before]`,
-          `[0:a]atrim=0:${seconds[0] - speedUpTime - zoomTime},asetpts=${c}[beforeA]`,
-        ] : []).concat([
-          `[0:v]trim=${seconds[0] - speedUpTime - zoomTime}:${seconds[0] - zoomTime},setpts=${1 / speedUpFactor}*${cBrackets}[speedUp]`,
-          `[0:v]trim=${seconds[0] - zoomTime}:${seconds[0] + zoomLateTime},scale=${zoomFactor}*iw:-1,crop=iw/${zoomFactor}:ih/${zoomFactor},setpts=${zoomSlowFactor}*${cBrackets}[zoom]`,
-          `[1:v]trim=start=${rInterval[0]}${rInterval[1] === -1 ? '' : `:end=${rInterval[1]}`},scale=${expectedSize[0]}:${expectedSize[1]},setpts=${c}[reaction]`,
-          next === null ? `[0:v]trim=start=${seconds[1]},setpts=${c}[after]` : `[0:v]trim=${seconds[1]}:${next[0] - speedUpTime - zoomTime},setpts=${c}[after]`,
-          // audio
-          `[0:a]atrim=${seconds[0] - speedUpTime - zoomTime}:${seconds[0] - zoomTime},asetpts=${c},atempo=${speedUpFactor}[speedUpA]`,
-          `[0:a]atrim=${seconds[0] - zoomTime}:${seconds[0] + zoomLateTime},asetpts=${c},atempo=${Math.max(0.5, 1 / zoomSlowFactor)}[zoomA]`,
-          `[1:a]atrim=start=${rInterval[0]}${rInterval[1] === -1 ? '' : `:end=${rInterval[1]}`},asetpts=${c}[reactionA]`,
-          next === null ? `[0:a]atrim=start=${seconds[1]},asetpts=${c}[afterA]` : `[0:a]atrim=${seconds[1]}:${next[0] - speedUpTime - zoomTime},asetpts=${c}[afterA]`,
-        ]);
-        const outputs = (i === 0 ? [
-          'before', 'beforeA',
-        ] : []).concat([
-          'speedUp', 'speedUpA',
-          'zoom', 'zoomA',
-          'reaction', 'reactionA',
-          'after', 'afterA',
-        ]);
-        const prefix = outputs.map((it) => `[${it}]`).join('');
-        filters.push(`${prefix}concat=n=${Math.round(outputs.length / 2)}:v=1:a=1[output]`);
-        ffmpeg(args.tee, {
-          // stdoutLines: Infinity,
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise((res, rej) => {
+      let lastPercentage = 0;
+      const c = 'PTS-STARTPTS';
+      const cBrackets = `(${c})`;
+      const seconds = youtubeIntervals[i];
+      const rInterval = reactionIntervals[i];
+      const next = youtubeIntervals[i + 1] || null;
+      const filters = (i === 0 ? [
+        `[0:v]trim=0:${seconds[0] - speedUpTime - zoomTime},setpts=${c}[before]`,
+        `[0:a]atrim=0:${seconds[0] - speedUpTime - zoomTime},asetpts=${c}[beforeA]`,
+      ] : []).concat([
+        `[0:v]trim=${seconds[0] - speedUpTime - zoomTime}:${seconds[0] - zoomTime},setpts=${1 / speedUpFactor}*${cBrackets}[speedUp]`,
+        `[0:v]trim=${seconds[0] - zoomTime}:${seconds[0] + zoomLateTime},scale=${zoomFactor}*iw:-1,crop=iw/${zoomFactor}:ih/${zoomFactor},setpts=${zoomSlowFactor}*${cBrackets}[zoom]`,
+        `[1:v]trim=start=${rInterval[0]}${rInterval[1] === -1 ? '' : `:end=${rInterval[1]}`},scale=${expectedSize[0]}:${expectedSize[1]},setpts=${c}[reaction]`,
+        next === null ? `[0:v]trim=start=${seconds[1]},setpts=${c}[after]` : `[0:v]trim=${seconds[1]}:${next[0] - speedUpTime - zoomTime},setpts=${c}[after]`,
+        // audio
+        `[0:a]atrim=${seconds[0] - speedUpTime - zoomTime}:${seconds[0] - zoomTime},asetpts=${c},atempo=${speedUpFactor}[speedUpA]`,
+        `[0:a]atrim=${seconds[0] - zoomTime}:${seconds[0] + zoomLateTime},asetpts=${c},atempo=${Math.max(0.5, 1 / zoomSlowFactor)}[zoomA]`,
+        `[1:a]atrim=start=${rInterval[0]}${rInterval[1] === -1 ? '' : `:end=${rInterval[1]}`},asetpts=${c}[reactionA]`,
+        next === null ? `[0:a]atrim=start=${seconds[1]},asetpts=${c}[afterA]` : `[0:a]atrim=${seconds[1]}:${next[0] - speedUpTime - zoomTime},asetpts=${c}[afterA]`,
+      ]);
+      const outputs = (i === 0 ? [
+        'before', 'beforeA',
+      ] : []).concat([
+        'speedUp', 'speedUpA',
+        'zoom', 'zoomA',
+        'reaction', 'reactionA',
+        'after', 'afterA',
+      ]);
+      const prefix = outputs.map((it) => `[${it}]`).join('');
+      filters.push(`${prefix}concat=n=${Math.round(outputs.length / 2)}:v=1:a=1[output]`);
+      ffmpeg(args.tee, {
+        // stdoutLines: Infinity,
+      })
+        .input(args.e)
+        .complexFilter(filters, 'output')
+        .outputOptions([
+          // `-ss ${seconds[0] - speedUpTime - zoomTime - 5}`,
+          // '-t 30',
+          '-y',
+        ])
+        .on('start', (commandLine) => {
+          console.log(`\n${commandLine}\n`);
         })
-          .input(args.e)
-          .complexFilter(filters, 'output')
-          .outputOptions([
-            // `-ss ${seconds[0] - speedUpTime - zoomTime - 5}`,
-            // '-t 30',
-            '-y',
-          ])
-          .on('start', (commandLine) => {
-            console.log(`\n${commandLine}\n`);
-          })
-          .on('end', res)
-          .on('error', rej)
-          .on('progress', (info) => {
-            const ceiledPercent = Math.ceil(info.percent);
-            if (ceiledPercent !== lastPercentage) {
-              lastPercentage = ceiledPercent;
-              process.send({
-                status: `Generating part ${i + 1}/${youtubeIntervals.length} (${lastPercentage}%)...`,
-              });
-            }
-          })
-          // .on('end', (stdout, stderr) => {
-          //   console.log(stdout);
-          //   console.log(stderr);
-          // })
-          .save(path.join(args.o, `temp_part${i}.mp4`));
-      });
-    }
+        .on('end', res)
+        .on('error', rej)
+        .on('progress', (info) => {
+          const ceiledPercent = Math.ceil(info.percent);
+          if (ceiledPercent !== lastPercentage) {
+            lastPercentage = ceiledPercent;
+            process.send({
+              status: `Generating part ${i + 1}/${youtubeIntervals.length} (${lastPercentage}%)...`,
+            });
+          }
+        })
+        // .on('end', (stdout, stderr) => {
+        //   console.log(stdout);
+        //   console.log(stderr);
+        // })
+        .save(path.join(args.o, `temp_part${i}.mp4`));
+    });
   }
   await writeFile(path.join(args.o, 'concat_list_temp.txt'), [...Array(youtubeIntervals.length).keys()].map(
     (it) => `file 'temp_part${it}.mp4'`,

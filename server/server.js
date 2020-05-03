@@ -18,7 +18,7 @@ const writeFile = util.promisify(fs.writeFile);
 
 const app = express();
 const port = 2020;
-const VIDEO_CHECK_INTERVAL = 1000 * 60 * 30;
+const VIDEO_CHECK_INTERVAL = 1000 * 60 * 20;
 const VIDEO_HISTORY_SIZE = 15;
 const NAMESPACE = 'd9d88ddb-af7e-4e34-83bb-dafc12f56b47';
 const DATA_DIR = '../data';
@@ -218,7 +218,7 @@ async function executeTask(task) {
       console.warn(`Failed to process task ${task.name}: ${e}`);
       if (video.status !== 'error') {
         video.status = 'error';
-        video.statusText = 'Error occured :(';
+        video.statusText = e.toString();
       }
       if (curTask.status !== 'error') {
         curTask.status = 'error';

@@ -87,18 +87,23 @@ async function extractLinks(id) {
 }
 
 async function videoCommand(id, output) {
-  await downloadYoutube(id, output);
   const links = await extractLinks(id);
+  let bitchuteFound = false;
   // eslint-disable-next-line no-restricted-syntax
   for (const link of links) {
     if (link.includes('bitchute')) {
       console.log(`>${link}`);
       // eslint-disable-next-line no-await-in-loop
       await downloadBitchute(link, output);
+      bitchuteFound = true;
     } else {
       console.log(link);
     }
   }
+  if (!bitchuteFound) {
+    throw new Error('couldn\'t find bitchute link!');
+  }
+  await downloadYoutube(id, output);
   console.log('Done');
 }
 
