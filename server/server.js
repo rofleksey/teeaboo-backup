@@ -10,11 +10,13 @@ const path = require('path');
 const util = require('util');
 const { fork } = require('child_process');
 const { drive, mem, cpu } = require('node-os-utils');
+const rimraf = require('rimraf');
 
 const exists = util.promisify(fs.exists);
 const mkdir = util.promisify(fs.mkdir);
 const readFile = util.promisify(fs.readFile);
 const writeFile = util.promisify(fs.writeFile);
+const unlink = util.promisify(fs.unlink);
 
 const app = express();
 const port = 2020;
@@ -22,7 +24,7 @@ const VIDEO_CHECK_INTERVAL = 1000 * 60 * 20;
 const VIDEO_HISTORY_SIZE = 15;
 const NAMESPACE = 'd9d88ddb-af7e-4e34-83bb-dafc12f56b47';
 const DATA_DIR = '../data';
-const INFO_UPDATE_INTERVAL = 4 * 1000;
+const INFO_UPDATE_INTERVAL = 10 * 1000;
 
 let cpuUsage = 0;
 let driveInfo = 0;
@@ -153,6 +155,39 @@ function messagesHandler(task, video) {
   };
 }
 
+async function cleanupVideos() {
+  try {
+    while (videos.length > VIDEO_HISTORY_SIZE) {
+      if (videos[0].status === 'processing') {
+        return;
+      }
+      const video = videos.shift();
+      console.log(`Deleting video with id=${video.id}...`);
+      const task = queue.array.find((t) => t.id === video.id);
+      if (video.folder) {
+        const videoDir = path.join(DATA_DIR, video.folder);
+        await new Promise((res, rej) => {
+          rimraf(videoDir, (err) => {
+            if (err) {
+              rej(err);
+            }
+            res();
+          });
+        });
+      }
+      if (task) {
+        task.status = 'deleted';
+        task.statusText = 'Deleted';
+        task.time = Date.now();
+        await saveObjectToFile(queue, 'queue.json');
+      }
+      await saveObjectToFile(videos, 'videos.json');
+    }
+  } catch (e) {
+    console.error(`Error while cleaning up videos: ${e}`);
+  }
+}
+
 async function executeTask(task) {
   curTask = task;
   if (task.type === 'youtube') {
@@ -182,7 +217,7 @@ async function executeTask(task) {
       }
       video.thumbnail = path.join(videoDir, 'thumbnail.jpg');
       console.log(`Downloading ${task.name}...`);
-      const { code: downloaderCode } = await runExternalNode(
+      const { code: downloaderCode, output: downloadOutput } = await runExternalNode(
         'Downloader',
         './downloader/downloader.js',
         ['video', task.id.toString(), videoDir],
@@ -195,11 +230,11 @@ async function executeTask(task) {
       }
       console.log(`Compiling ${task.name}...`);
       const youtubeVideo = path.join(videoDir, 'youtube.mp4');
-      const bitchuteVideo = path.join(videoDir, 'bitchute.mp4');
-      const { code: compilerCode } = await runExternalNode(
+      const reactionVideo = downloadOutput.usedMega ? path.join(videoDir, 'mega.mp4') : path.join(videoDir, 'bitchute.mp4');
+      const { code: compilerCode, output: compilerOutput } = await runExternalNode(
         'Compiler',
         './compiler/compiler.js',
-        ['-t', youtubeVideo, '-e', bitchuteVideo, '-o', videoDir],
+        ['-t', youtubeVideo, '-e', reactionVideo, '-o', videoDir],
         messagesHandler(task, video),
       );
       if (compilerCode === 0) {
@@ -207,11 +242,17 @@ async function executeTask(task) {
       } else {
         throw new Error(`Failed to compile ${task.name}!`);
       }
+      console.log('Deleting original files...');
+      if (fs.existsSync(youtubeVideo)) {
+        await unlink(youtubeVideo);
+      }
+      if (fs.existsSync(reactionVideo)) {
+        await unlink(reactionVideo);
+      }
       video.status = 'ready';
       video.statusText = 'Ready';
       video.folder = actualFolderName;
-      video.file = 'full.mp4';
-      video.link = `/data/${actualFolderName}/full.mp4`;
+      video.files = compilerOutput.map((file) => `${file}.mp4`);
       curTask.status = 'ready';
       curTask.statusText = 'Ready!';
     } catch (e) {
@@ -248,25 +289,43 @@ async function mainLoop() {
   });
   // eslint-disable-next-line no-constant-condition
   while (true) {
+    await cleanupVideos();
     if (queue.pointer < queue.array.length) {
       const task = queue.array[queue.pointer];
       try {
-        if (task.status !== 'ready') {
+        if (task.status !== 'ready' && task.status !== 'deleted') {
           await executeTask(task);
           console.log(`Task finished! ${queue.array.length - queue.pointer - 1} remaining`);
+          await delay(1000);
         } else {
           console.log(`Task is already finished! ${queue.array.length - queue.pointer - 1} remaining`);
         }
       } catch (e) {
         console.error(e);
+        await delay(1000);
       } finally {
         queue.pointer += 1;
         await saveObjectToFile(queue, 'queue.json');
       }
+    } else {
+      await delay(1000);
     }
-    await delay(1000);
   }
 }
+
+app.get('/api/watch', async (req, res) => {
+  try {
+    const video = videos.find((v) => v.folder === req.query.id);
+    if (!video) {
+      throw new Error('Can\'t find video with target id!');
+    }
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify(video.files));
+  } catch (e) {
+    console.error(e);
+    res.status(500).end();
+  }
+});
 
 app.get('/api/videos', async (req, res) => {
   try {

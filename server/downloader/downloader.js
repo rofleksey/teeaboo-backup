@@ -1,44 +1,46 @@
 /* eslint-disable no-unused-vars */
 const axios = require('axios');
+const fs = require('fs');
 const path = require('path');
 const youtubedl = require('youtube-dl');
 const getUrls = require('get-urls');
 const cheerio = require('cheerio');
 const download = require('download');
+const { exec } = require('child_process');
 
-const apiKey = process.env.YOUTUBE_API_KEY || '';
+const apiKey = process.env.YOUTUBE_API_KEY;
+const megaEmail = process.env.MEGA_EMAIL;
+const megaPass = process.env.MEGA_PASS;
 const apiPrefix = 'https://www.googleapis.com/youtube/v3/';
 const channelId = 'UCcAJb3qfTvEZdDl6tOv0nfA';
 
-// QRajskbC-BQ
+if (!apiKey) {
+  console.error('YOUTUBE_API_KEY env var is undefined!');
+  process.exit(1);
+}
+
+if (!megaEmail || !megaPass) {
+  console.warn('MEGA_EMAIL or MEGA_PASS env vars are undefined!');
+}
+
+if (!process.send) {
+  process.send = (a, cb) => {
+    console.log(JSON.stringify(a, null, 1));
+    if (cb) {
+      cb();
+    }
+  };
+}
 
 async function listCommand(count) {
   const response = await axios.get(`${apiPrefix}search?key=${apiKey}&channelId=${channelId}&part=snippet,id&order=date&maxResults=${count}`);
-  process.send({
+  await new Promise((res) => process.send({
     result: response.data,
-  });
+  }, res));
   console.log(`Retreived ${response.data.items ? response.data.items.length : 'unknown number of'} items!`);
 }
 
 async function downloadYoutube(id, output) {
-  process.send({
-    status: 'Downloading youtube thumbnail...',
-  });
-  await new Promise((res, rej) => {
-    console.log('Downloading youtube thumbnail...');
-    youtubedl.exec(
-      `https://www.youtube.com/watch?v=${id}`,
-      ['--write-thumbnail', '--skip-download', '--output', path.join(output, 'thumbnail.jpg')],
-      {},
-      (err, msg) => {
-        if (err) {
-          rej(err);
-        }
-        console.log(msg.join('\n'));
-        res();
-      },
-    );
-  });
   process.send({
     status: 'Downloading youtube video...',
   });
@@ -72,6 +74,28 @@ async function downloadBitchute(url, output) {
   });
 }
 
+async function downloadMega(url, output) {
+  if (!megaEmail || !megaPass) {
+    throw new Error('MEGA credentials are not defined, skipping...');
+  }
+  process.send({
+    status: 'Downloading mega video...',
+  });
+  const filePath = path.join(output, 'mega.mp4');
+  const before = Date.now();
+  await new Promise((res, rej) => {
+    exec(`megatools dl --username '${megaEmail}' --password '${megaPass}' --path '${filePath}' '${url}'`, (e, out, stderr) => {
+      if (e) {
+        rej(stderr);
+      }
+      res();
+    });
+  });
+  if (Date.now() - before < 5000) {
+    throw new Error('unexpected megatools error!');
+  }
+}
+
 function getVideoIdFromLink(url) {
   const regExp = /.*(?:youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=)([^#&?]*).*/;
   const match = url.match(regExp);
@@ -88,23 +112,74 @@ async function extractLinks(id) {
 
 async function videoCommand(id, output) {
   const links = await extractLinks(id);
-  let bitchuteFound = false;
+  process.send({
+    status: 'Downloading youtube thumbnail...',
+  });
+  await new Promise((res, rej) => {
+    console.log('Downloading youtube thumbnail...');
+    youtubedl.exec(
+      `https://www.youtube.com/watch?v=${id}`,
+      ['--write-thumbnail', '--skip-download', '--output', path.join(output, 'thumbnail.jpg')],
+      {},
+      (err, msg) => {
+        if (err) {
+          rej(err);
+        }
+        console.log(msg.join('\n'));
+        res();
+      },
+    );
+  });
+  const validLinks = {
+    bitchute: null,
+    mega: null,
+  };
   // eslint-disable-next-line no-restricted-syntax
   for (const link of links) {
     if (link.includes('bitchute')) {
       console.log(`>${link}`);
-      // eslint-disable-next-line no-await-in-loop
-      await downloadBitchute(link, output);
-      bitchuteFound = true;
+      validLinks.bitchute = link;
+    } else if (link.includes('mega')) {
+      console.log(`>${link}`);
+      validLinks.mega = link;
     } else {
       console.log(link);
     }
   }
-  if (!bitchuteFound) {
-    throw new Error('couldn\'t find bitchute link!');
+
+  if (!validLinks.mega && !validLinks.bitchute) {
+    throw new Error('couldn\'t find any valid link!');
   }
+
+  let usedMega = true;
+
+  if (validLinks.mega) {
+    try {
+      await downloadMega(validLinks.mega, output);
+    } catch (e) {
+      console.log(`Failed to download MEGA: ${e}`);
+      console.log('Downloading bitchute instead');
+      usedMega = false;
+      await downloadBitchute(validLinks.bitchute, output);
+    }
+  } else {
+    console.log('No MEGA links found!');
+    console.log('Downloading bitchute instead');
+    usedMega = false;
+    await downloadBitchute(validLinks.bitchute, output);
+  }
+
   await downloadYoutube(id, output);
+
+  await new Promise((res) => process.send({
+    result: {
+      usedMega,
+    },
+  }, res));
+
   console.log('Done');
+  // fix async leak?
+  process.exit(0);
 }
 
 function axiosErrorCatcher(e) {

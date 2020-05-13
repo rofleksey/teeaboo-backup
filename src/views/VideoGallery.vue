@@ -35,14 +35,6 @@
             <!-- <v-btn icon>
               <v-icon>mdi-tea</v-icon>
             </v-btn> -->
-
-            <v-btn
-              icon
-              :disabled='!video.link'
-              :to="undefined"
-              :href='video.link'>
-              <v-icon>mdi-download</v-icon>
-            </v-btn>
           </v-card-actions>
         </v-card>
       </v-col>
