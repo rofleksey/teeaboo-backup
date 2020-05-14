@@ -1,5 +1,12 @@
 <template>
   <v-container align="center">
+    <loading
+      :active.sync="isLoading"
+      :opacity="0.25"
+      loader="dots"
+      color="#6f930b"
+      :is-full-page="false"
+      :can-cancel="true" />
     <v-container>
       <div>
         Cpu usage ({{cpuUsage}}%)
@@ -15,7 +22,7 @@
       </div>
     </v-container>
     <v-list align="center" two-line max-width="1000">
-      <template v-for="(item, index) in tasks">
+      <template v-for="(item, index) in filteredTasks">
         <v-list-item
           :style="{'background-color': item.color}"
           :class="item.status === 'processing' ? 'processing-queue-item' : ''"
@@ -51,7 +58,7 @@
           </v-list-item-action>
         </v-list-item>
 
-        <v-divider v-if="index + 1 < tasks.length" :key="index"></v-divider>
+        <v-divider v-if="index + 1 < filteredTasks.length" :key="index"></v-divider>
       </template>
     </v-list>
   </v-container>
@@ -59,13 +66,25 @@
 
 <script>
 import axios from 'axios';
+import Loading from 'vue-loading-overlay';
+import 'vue-loading-overlay/dist/vue-loading.css';
 
 const POLL_INTERVAL = 15 * 1000;
 const INFO_POLL_INTERVAL = 10 * 1000;
 
 export default {
   name: 'QueueList',
-  computed: {},
+  computed: {
+    filteredTasks() {
+      return this.tasks.filter((v) => v.name.toLowerCase().includes(this.q.toLowerCase()));
+    },
+  },
+  components: {
+    Loading,
+  },
+  props: {
+    q: String,
+  },
   mounted() {
     const poll = () => {
       axios.get('/api/queue').then((res) => {
@@ -92,6 +111,8 @@ export default {
             color,
           });
         }).reverse();
+      }).finally(() => {
+        this.isLoading = false;
       });
     };
     poll();
@@ -114,6 +135,7 @@ export default {
   data: () => ({
     intervalId: undefined,
     infoIntervalId: undefined,
+    isLoading: true,
     cpuUsage: 0,
     driveInfo: null,
     memInfo: null,

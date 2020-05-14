@@ -1,5 +1,12 @@
 <template>
   <v-container>
+    <loading
+      :active.sync="isLoading"
+      :opacity="0.25"
+      loader="dots"
+      color="#6f930b"
+      :is-full-page="false"
+      :can-cancel="true" />
     <v-row align="start" justify="start">
       <v-col
         v-for="video in filteredData"
@@ -44,11 +51,16 @@
 
 <script>
 import axios from 'axios';
+import Loading from 'vue-loading-overlay';
+import 'vue-loading-overlay/dist/vue-loading.css';
 
 const POLL_INTERVAL = 15 * 1000;
 
 export default {
   name: 'VideoGallery',
+  components: {
+    Loading,
+  },
   computed: {
     cols() {
       const {
@@ -83,6 +95,8 @@ export default {
           ...v,
           statusText: v.status === 'ready' ? v.time : v.statusText,
         })).reverse();
+      }).finally(() => {
+        this.isLoading = false;
       });
     };
     poll();
@@ -93,6 +107,7 @@ export default {
   },
   data: () => ({
     intervalId: undefined,
+    isLoading: true,
     videos: [
       // {
       //   thumbnail: 'https://i.ytimg.com/vi/wXOzHXE61j4/hqdefault.jpg?sqp=-oaymwEZCPYBEIoBSFXyq4qpAwsIARUAAIhCGAFwAQ==&rs=AOn4CLCOaQtOGr7L0rFECxbxmySj8bt7ZA',

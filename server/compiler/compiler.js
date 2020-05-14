@@ -29,11 +29,7 @@ const reactionFromYoutubeSafetySeconds = 30;
 const [cropW, cropH, cropOffsetX, cropOffsetY] = [100, 3, 10, 10];
 const timerTime = 5;
 const speedUpTime = 20;
-const speedUpFactor = 8;
 const zoomTime = 2;
-const zoomLateTime = 1;
-const zoomFactor = 1.75;
-const zoomSlowFactor = 1.6;
 const expectedSize = [];
 
 const args = yargs
@@ -182,8 +178,8 @@ async function generateVideo(youtubeIntervals, reactionIntervals) {
   }
   const videoSplitter = new VideoSplitter(tempDir, args.o);
   for (let i = 0; i < youtubeIntervals.length; i += 1) {
-    const c = 'PTS-STARTPTS';
-    const cBrackets = `(${c})`;
+    // const c = 'PTS-STARTPTS';
+    // const cBrackets = `(${c})`;
     const seconds = youtubeIntervals[i];
     const rInterval = reactionIntervals[i];
     const next = youtubeIntervals[i + 1] || null;
@@ -191,18 +187,6 @@ async function generateVideo(youtubeIntervals, reactionIntervals) {
       videoSplitter.withFile(args.tee, 'intro', (cuts) => {
         // intro
         cuts.addPart(0, seconds[0] - speedUpTime - zoomTime);
-        // speed up
-        cuts.addPart(
-          seconds[0] - speedUpTime - zoomTime,
-          null,
-          `[0:v]trim=end=${speedUpTime},setpts=${1 / speedUpFactor}*${cBrackets}[v];[0:a]atrim=end=${speedUpTime},asetpts=${c},atempo=${speedUpFactor}[a]`,
-        );
-        // zoom
-        cuts.addPart(
-          seconds[0] - zoomTime,
-          null,
-          `[0:v]trim=end=${zoomTime + zoomLateTime},setpts=${zoomSlowFactor}*${cBrackets},scale=${zoomFactor}*iw:-1,crop=iw/${zoomFactor}:ih/${zoomFactor}[v];[0:a]atrim=end=${zoomTime + zoomLateTime},asetpts=${c},atempo=${Math.max(0.5, 1 / zoomSlowFactor)}[a]`,
-        );
       });
     }
     videoSplitter.withFile(args.e, `reaction${i + 1}`, (cuts) => {

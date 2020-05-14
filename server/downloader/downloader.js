@@ -88,7 +88,7 @@ async function downloadMega(url, output) {
   });
   const filePath = path.join(output, 'mega.mp4');
   const before = Date.now();
-  await new Promise((res, rej) => {
+  const fastSkipped = await new Promise((res, rej) => {
     const updateStatus = throttle((status) => {
       process.send({
         status,
@@ -98,13 +98,13 @@ async function downloadMega(url, output) {
       updateStatus.flush();
       if (e) {
         if (stderr.toString().includes('File already exists')) {
-          console.log('MEGA file already downloaded');
-          res();
+          console.log('MEGA file already downloaded!');
+          res(true);
           return;
         }
         rej(stderr);
       }
-      res();
+      res(false);
     });
     cp.stdout.on('data', (data) => {
       const status = data.toString().trim();
@@ -113,7 +113,7 @@ async function downloadMega(url, output) {
       }
     });
   });
-  if (Date.now() - before < 5000) {
+  if (!fastSkipped && Date.now() - before < 5000) {
     throw new Error('unexpected megatools error!');
   }
 }

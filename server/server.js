@@ -11,6 +11,7 @@ const util = require('util');
 const { fork } = require('child_process');
 const { drive, mem, cpu } = require('node-os-utils');
 const rimraf = require('rimraf');
+// const { sortBy } = require('lodash');
 
 const exists = util.promisify(fs.exists);
 const mkdir = util.promisify(fs.mkdir);
@@ -115,14 +116,26 @@ async function checkVideos() {
           if (
             queue.array.findIndex((task) => task.id === item.id.videoId) < 0
           ) {
-            queue.array.push({
-              type: 'youtube',
-              id: item.id.videoId,
-              name: sanitize(item.snippet.title),
-              status: 'pending',
-              statusText: 'Pending',
-              time: Date.now(),
-            });
+            const vIndex = videos.findIndex((v) => v.id === item.id.videoId);
+            if (vIndex >= 0 && videos[vIndex].status === 'ready') {
+              queue.array.push({
+                type: 'youtube',
+                id: item.id.videoId,
+                name: sanitize(item.snippet.title),
+                status: 'ready',
+                statusText: 'Ready!',
+                time: videos[vIndex].time,
+              });
+            } else {
+              queue.array.push({
+                type: 'youtube',
+                id: item.id.videoId,
+                name: sanitize(item.snippet.title),
+                status: 'pending',
+                statusText: 'Pending',
+                time: Date.now(),
+              });
+            }
             newTasks += 1;
           }
         } catch (e) {
@@ -277,6 +290,17 @@ function delay(time) {
   return new Promise((res) => setTimeout(res, time));
 }
 
+// function sortVideos() {
+//   const indexedVideos = videos.map((video) => {
+//     const index = queue.array.findIndex((task) => task.id === video.id);
+//     return {
+//       video,
+//       pos: index < 0 ? Infinity : index,
+//     };
+//   });
+//   videos = sortBy(indexedVideos, (v) => v.pos).map((v) => v.video);
+// }
+
 async function mainLoop() {
   queue = await loadObjectFromFile('queue.json', {
     array: [],
@@ -284,6 +308,7 @@ async function mainLoop() {
   });
   queue.pointer = 0;
   videos = await loadObjectFromFile('videos.json', []);
+  // sortVideos();
   checkVideos().catch((e) => {
     console.error(e);
   });
