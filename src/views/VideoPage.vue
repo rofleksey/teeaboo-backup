@@ -7,7 +7,7 @@
         justify="center"
       >
         <v-col
-          cols="10"
+          cols="9"
         >
           <video
               ref="video"
@@ -23,7 +23,19 @@
               </a>
             </p>
           </video>
-          <div class="vjs-playlist" id="playlist"></div>
+          <v-bottom-navigation
+            color="purple lighten-1"
+            v-model="curButton"
+          >
+            <v-btn
+              v-for="(item, index) in buttons"
+              :value="item.name"
+              :key="item.name"
+              @click="() => playlistGoTo(index)">
+              <span>{{item.name}}</span>
+              <v-icon>{{item.icon}}</v-icon>
+            </v-btn>
+          </v-bottom-navigation>
         </v-col>
       </v-row>
   </v-container>
@@ -50,6 +62,23 @@ export default {
   name: 'VideoPage',
   components: {},
   computed: {},
+  methods: {
+    playlistGoTo(index) {
+      player.playlist.currentItem(index);
+    },
+    getIcon(name) {
+      if (name.includes('discussion')) {
+        return 'mdi-tea';
+      }
+      if (name.includes('reaction')) {
+        return 'mdi-account';
+      }
+      if (name.includes('intro')) {
+        return 'mdi-kettle';
+      }
+      return 'mdi-help';
+    },
+  },
   mounted() {
     const videoId = this.$route.params.id;
     player = videojs(this.$refs.video, {
@@ -80,27 +109,38 @@ export default {
       });
     });
     axios.get(`/api/watch?id=${videoId}`).then((res) => {
-      player.playlist(res.data.map((file) => ({
+      const playlist = res.data.map((file) => ({
         name: file.replace('.mp4', ''),
         sources: [{
           src: `/data/${videoId}/${file}`,
           type: 'video/mp4',
         }],
         poster: `/data/${videoId}/thumbnail.jpg`,
-      })));
+      }));
+      this.buttons = playlist.map((item) => ({
+        name: item.name,
+        icon: this.getIcon(item.name),
+      }));
+      this.curButton = this.buttons[0].name;
+      player.playlist(playlist);
       console.log('Playlist loaded!');
       player.playlist.autoadvance(0);
-      player.playlistUi({
-        el: document.getElementById('playlist'),
+      player.on('playlistitem', () => {
+        this.curButton = this.buttons[player.playlist.currentItem()].name;
       });
       player.play();
+      this.$Progress.finish();
+    }).catch((e) => {
+      console.error(e);
+      this.$Progress.fail();
     });
   },
   unmounted() {
     player.dispose();
   },
   data: () => ({
-    //
+    buttons: [],
+    curButton: null,
   }),
 };
 </script>

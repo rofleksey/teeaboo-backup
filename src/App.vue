@@ -1,5 +1,6 @@
 <template>
   <v-app id="inspire">
+    <vue-progress-bar></vue-progress-bar>
     <v-navigation-drawer v-model="drawer" color="#303034" mini-variant app clipped>
       <v-list dense>
         <v-list-item v-for="item in items" :key="item.text" :to="item.link" link>
@@ -64,6 +65,11 @@ export default {
     ],
   }),
   created() {
+    this.$Progress.start();
+    this.$router.beforeEach((to, from, next) => {
+      this.$Progress.start();
+      next();
+    });
     this.$vuetify.theme.dark = true;
   },
 };

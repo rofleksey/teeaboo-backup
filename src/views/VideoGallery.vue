@@ -84,17 +84,27 @@ export default {
     filteredData() {
       return this.videos.filter((v) => v.name.toLowerCase().includes(this.q.toLowerCase()));
     },
+    videos() {
+      return this.$store.state.videos;
+    },
   },
   props: {
     q: String,
   },
   mounted() {
+    if (this.videos.length !== 0) {
+      this.isLoading = false;
+    }
     const poll = () => {
       axios.get('/api/videos').then((res) => {
-        this.videos = res.data.map((v) => ({
+        this.$store.commit('setVideos', res.data.map((v) => ({
           ...v,
           statusText: v.status === 'ready' ? v.time : v.statusText,
-        })).reverse();
+        })).reverse());
+        this.$Progress.finish();
+      }).catch((e) => {
+        console.error(e);
+        this.$Progress.fail();
       }).finally(() => {
         this.isLoading = false;
       });
@@ -108,99 +118,6 @@ export default {
   data: () => ({
     intervalId: undefined,
     isLoading: true,
-    videos: [
-      // {
-      //   thumbnail: 'https://i.ytimg.com/vi/wXOzHXE61j4/hqdefault.jpg?sqp=-oaymwEZCPYBEIoBSFXyq4qpAwsIARUAAIhCGAFwAQ==&rs=AOn4CLCOaQtOGr7L0rFECxbxmySj8bt7ZA',
-      //   name: 'Teeaboo Reacts - Flip Flappers Episode 7 - Disillusioned',
-      //   id: 0,
-      //   status: 'processing',
-      //   statusText: 'Generating video...',
-      // },
-      // {
-      //   thumbnail: 'https://i.ytimg.com/vi/wXOzHXE61j4/hqdefault.jpg?sqp=-oaymwEZCPYBEIoBSFXyq4qpAwsIARUAAIhCGAFwAQ==&rs=AOn4CLCOaQtOGr7L0rFECxbxmySj8bt7ZA',
-      //   name: 'Teeaboo Reacts - Flip Flappers Episode 8 - Test',
-      //   id: 1,
-      //   status: 'ready',
-      //   statusText: '6 hours ago',
-      // },
-      // {
-      //   thumbnail: 'https://i.ytimg.com/vi/wXOzHXE61j4/hqdefault.jpg?sqp=-oaymwEZCPYBEIoBSFXyq4qpAwsIARUAAIhCGAFwAQ==&rs=AOn4CLCOaQtOGr7L0rFECxbxmySj8bt7ZA',
-      //   name: 'Teeaboo Reacts - Flip Flappers Episode 8 - ewfewuqhfiore',
-      //   id: 2,
-      //   status: 'ready',
-      //   statusText: '7 hours ago',
-      // },
-      // {
-      //   thumbnail: 'https://i.ytimg.com/vi/wXOzHXE61j4/hqdefault.jpg?sqp=-oaymwEZCPYBEIoBSFXyq4qpAwsIARUAAIhCGAFwAQ==&rs=AOn4CLCOaQtOGr7L0rFECxbxmySj8bt7ZA',
-      //   name: 'test3',
-      //   id: 3,
-      //   status: 'error',
-      //   statusText: 'Array index out of bounds',
-      // },
-      // {
-      //   thumbnail: 'https://i.ytimg.com/vi/wXOzHXE61j4/hqdefault.jpg?sqp=-oaymwEZCPYBEIoBSFXyq4qpAwsIARUAAIhCGAFwAQ==&rs=AOn4CLCOaQtOGr7L0rFECxbxmySj8bt7ZA',
-      //   name: 'test4',
-      //   id: 4,
-      //   status: 'ready',
-      //   statusText: '1 day ago',
-      // },
-      // {
-      //   thumbnail: 'https://i.ytimg.com/vi/wXOzHXE61j4/hqdefault.jpg?sqp=-oaymwEZCPYBEIoBSFXyq4qpAwsIARUAAIhCGAFwAQ==&rs=AOn4CLCOaQtOGr7L0rFECxbxmySj8bt7ZA',
-      //   name: 'test5',
-      //   id: 5,
-      //   status: 'ready',
-      //   statusText: '3 day ago',
-      // },
-      // {
-      //   thumbnail: 'https://i.ytimg.com/vi/wXOzHXE61j4/hqdefault.jpg?sqp=-oaymwEZCPYBEIoBSFXyq4qpAwsIARUAAIhCGAFwAQ==&rs=AOn4CLCOaQtOGr7L0rFECxbxmySj8bt7ZA',
-      //   name: 'test6',
-      //   id: 6,
-      //   status: 'ready',
-      //   statusText: 'a week ago',
-      // },
-      // {
-      //   thumbnail: 'https://i.ytimg.com/vi/wXOzHXE61j4/hqdefault.jpg?sqp=-oaymwEZCPYBEIoBSFXyq4qpAwsIARUAAIhCGAFwAQ==&rs=AOn4CLCOaQtOGr7L0rFECxbxmySj8bt7ZA',
-      //   name: 'test7',
-      //   id: 7,
-      //   status: 'ready',
-      //   statusText: 'two weeks ago',
-      // },
-      // {
-      //   thumbnail: 'https://i.ytimg.com/vi/wXOzHXE61j4/hqdefault.jpg?sqp=-oaymwEZCPYBEIoBSFXyq4qpAwsIARUAAIhCGAFwAQ==&rs=AOn4CLCOaQtOGr7L0rFECxbxmySj8bt7ZA',
-      //   name: 'test8',
-      //   id: 8,
-      //   status: 'ready',
-      //   statusText: 'three week ago',
-      // },
-      // {
-      //   thumbnail: 'https://i.ytimg.com/vi/wXOzHXE61j4/hqdefault.jpg?sqp=-oaymwEZCPYBEIoBSFXyq4qpAwsIARUAAIhCGAFwAQ==&rs=AOn4CLCOaQtOGr7L0rFECxbxmySj8bt7ZA',
-      //   name: 'test9',
-      //   id: 9,
-      //   status: 'ready',
-      //   statusText: 'a month ago',
-      // },
-      // {
-      //   thumbnail: 'https://i.ytimg.com/vi/wXOzHXE61j4/hqdefault.jpg?sqp=-oaymwEZCPYBEIoBSFXyq4qpAwsIARUAAIhCGAFwAQ==&rs=AOn4CLCOaQtOGr7L0rFECxbxmySj8bt7ZA',
-      //   name: 'test10',
-      //   id: 10,
-      //   status: 'ready',
-      //   statusText: 'three week ago',
-      // },
-      // {
-      //   thumbnail: 'https://i.ytimg.com/vi/wXOzHXE61j4/hqdefault.jpg?sqp=-oaymwEZCPYBEIoBSFXyq4qpAwsIARUAAIhCGAFwAQ==&rs=AOn4CLCOaQtOGr7L0rFECxbxmySj8bt7ZA',
-      //   name: 'test11',
-      //   id: 11,
-      //   status: 'ready',
-      //   statusText: 'a month ago',
-      // },
-      // {
-      //   thumbnail: 'https://i.ytimg.com/vi/wXOzHXE61j4/hqdefault.jpg?sqp=-oaymwEZCPYBEIoBSFXyq4qpAwsIARUAAIhCGAFwAQ==&rs=AOn4CLCOaQtOGr7L0rFECxbxmySj8bt7ZA',
-      //   name: 'test12',
-      //   id: 12,
-      //   status: 'ready',
-      //   statusText: 'a month ago',
-      // },
-    ],
   }),
 };
 </script>

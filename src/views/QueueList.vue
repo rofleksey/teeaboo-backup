@@ -1,5 +1,5 @@
 <template>
-  <v-container align="center">
+  <v-container align="center" style="max-width: 1000px">
     <loading
       :active.sync="isLoading"
       :opacity="0.25"
@@ -8,20 +8,49 @@
       :is-full-page="false"
       :can-cancel="true" />
     <v-container>
-      <div>
-        Cpu usage ({{cpuUsage}}%)
-        <v-progress-linear :value="cpuUsage"></v-progress-linear>
-      </div>
-      <div v-if="memInfo">
-        Mem usage ({{memInfo.usedMemMb}} / {{memInfo.totalMemMb}} Mb)
-        <v-progress-linear :value="100 - memInfo.freeMemPercentage"></v-progress-linear>
-      </div>
-      <div v-if="driveInfo">
-        Disk usage ({{driveInfo.usedGb}} / {{driveInfo.totalGb}} Gb)
-        <v-progress-linear :value="driveInfo.usedPercentage"></v-progress-linear>
-      </div>
+      <v-row
+        class="my-1"
+        align="center"
+        justify="center"
+      >
+        <strong class="mx-4 info--text text--darken-2">
+          Cpu usage ({{cpuUsage}}%)
+        </strong>
+        <v-progress-circular
+          class="mr-2"
+          rotate="270"
+          :value="cpuUsage || 0" />
+      </v-row>
+      <v-row
+        class="my-1"
+        align="center"
+        justify="center"
+      >
+        <strong class="mx-4 info--text text--darken-2">
+          Mem usage ({{
+            memInfo ? memInfo.usedMemMb : ''}} / {{memInfo ? memInfo.totalMemMb : ''}} Mb)
+        </strong>
+        <v-progress-circular
+          class="mr-2"
+          :value="memInfo ? (100 - memInfo.freeMemPercentage) : 0"
+          rotate="270" />
+      </v-row>
+      <v-row
+        class="my-1"
+        justify="center"
+        align="center"
+      >
+        <strong class="mx-4 info--text text--darken-2">
+        Disk usage ({{
+          driveInfo ? driveInfo.usedGb : ''}} / {{driveInfo ? driveInfo.totalGb : ''}} Gb)
+        </strong>
+        <v-progress-circular
+          class="mr-2"
+          :value="driveInfo ? driveInfo.usedPercentage : 0"
+          rotate="270" />
+      </v-row>
     </v-container>
-    <v-list align="center" two-line max-width="1000">
+    <v-list align="center" two-line>
       <template v-for="(item, index) in filteredTasks">
         <v-list-item
           :style="{'background-color': item.color}"
@@ -66,6 +95,7 @@
 
 <script>
 import axios from 'axios';
+import VueScrollTo from 'vue-scrollto';
 import Loading from 'vue-loading-overlay';
 import 'vue-loading-overlay/dist/vue-loading.css';
 
@@ -78,6 +108,9 @@ export default {
     filteredTasks() {
       return this.tasks.filter((v) => v.name.toLowerCase().includes(this.q.toLowerCase()));
     },
+    tasks() {
+      return this.$store.state.tasks;
+    },
   },
   components: {
     Loading,
@@ -86,10 +119,13 @@ export default {
     q: String,
   },
   mounted() {
+    if (this.tasks.length !== 0) {
+      this.isLoading = false;
+    }
     const poll = () => {
       axios.get('/api/queue').then((res) => {
         const { array } = res.data;
-        this.tasks = array.map((task) => {
+        this.$store.commit('setTasks', array.map((task) => {
           let icon = 'mdi-question-mark';
           let color = 'black';
           if (task.status === 'pending') {
@@ -110,7 +146,19 @@ export default {
             icon,
             color,
           });
-        }).reverse();
+        }).reverse());
+        if (!this.alreadyScrolled) {
+          setTimeout(() => {
+            VueScrollTo.scrollTo('.processing-queue-item', 1000, {
+              easing: 'ease-in-out',
+            });
+          }, 10);
+          this.alreadyScrolled = true;
+        }
+        this.$Progress.finish();
+      }).catch((e) => {
+        console.error(e);
+        this.$Progress.fail();
       }).finally(() => {
         this.isLoading = false;
       });
@@ -133,46 +181,13 @@ export default {
     clearInterval(this.infoIntervalId);
   },
   data: () => ({
+    alreadyScrolled: false,
     intervalId: undefined,
     infoIntervalId: undefined,
     isLoading: true,
     cpuUsage: 0,
     driveInfo: null,
     memInfo: null,
-    tasks: [
-      // {
-      //   name: 'Teeaboo Reacts - Flip Flappers Episode 100 - Pending',
-      //   statusText: 'Pending',
-      //   status: 'pending',
-      //   time: '1 month ago',
-      //   icon: 'mdi-timer-sand',
-      //   color: 'gray',
-      // },
-      // {
-      //   name: 'Teeaboo Reacts - Flip Flappers Episode 7 - Disillusioned',
-      //   statusText: 'Generating video...',
-      //   status: 'processing',
-      //   time: '15 min ago',
-      //   icon: 'mdi-cog',
-      //   color: 'purple',
-      // },
-      // {
-      //   name: 'Teeaboo Reacts - Flip Flappers Episode 9 - Test',
-      //   statusText: 'Ready',
-      //   status: 'ready',
-      //   time: '1 day ago',
-      //   icon: 'mdi-check',
-      //   color: 'green',
-      // },
-      // {
-      //   name: 'Teeaboo Reacts - Flip Flappers Episode 10 - Error',
-      //   statusText: 'Array index out of bounds',
-      //   status: 'error',
-      //   time: '2 days ago',
-      //   icon: 'mdi-bug',
-      //   color: 'red',
-      // },
-    ],
   }),
 };
 </script>
