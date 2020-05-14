@@ -5,7 +5,7 @@ const { exec } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const yargs = require('yargs');
-
+const { throttle } = require('lodash');
 const { VideoSplitter } = require('./videoSplitter');
 
 if (!process.send) {
@@ -69,16 +69,27 @@ async function findBlackIntervals(video, opts) {
   const ss = options.from ? `-ss ${options.from}` : '';
   const to = options.to ? `-to ${options.to - (options.from || 0)}` : '';
   const output = await new Promise((res, rej) => {
-    const command = `ffmpeg ${ss} -i "${video}" ${to} -vf "crop=${cropW}:${cropH}:${cropOffsetX}:in_h-${cropH + cropOffsetY}, \
+    const command = `ffmpeg -hide_banner ${ss} -i "${video}" ${to} -vf "crop=${cropW}:${cropH}:${cropOffsetX}:in_h-${cropH + cropOffsetY}, \
     blackdetect=d=${minDuration}:pic_th=${fullBlackCountThreshold}:pix_th=${fullBlackColorThreshold}" \
     -an -f null - 2>&1`;
     console.log(command);
-    exec(command, (e, out) => {
+    const updateStatus = throttle((status) => {
+      process.send({
+        status,
+      });
+    }, 15000);
+    const cp = exec(command, (e, out) => {
+      updateStatus.flush();
       if (e) {
         rej(out);
       }
       res(out);
     });
+    if (options.progressName) {
+      cp.stdout.on('data', (data) => {
+        updateStatus(`[${options.progressName}] ${data.toString()}`);
+      });
+    }
   });
   return output
     .split('\n')
@@ -95,7 +106,9 @@ async function findBlackIntervals(video, opts) {
 
 async function getYoutubeIntervals() {
   console.log('Getting youtube time intervals...');
-  return findBlackIntervals(args.tee);
+  return findBlackIntervals(args.tee, {
+    progressName: 'analysis',
+  });
 }
 
 async function findTransition(video, from, to) {

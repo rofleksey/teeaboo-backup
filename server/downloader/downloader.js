@@ -2,11 +2,11 @@
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
-const youtubedl = require('youtube-dl');
 const getUrls = require('get-urls');
 const cheerio = require('cheerio');
 const download = require('download');
 const { exec } = require('child_process');
+const { throttle } = require('lodash');
 
 const apiKey = process.env.YOUTUBE_API_KEY;
 const megaEmail = process.env.MEGA_EMAIL;
@@ -46,18 +46,23 @@ async function downloadYoutube(id, output) {
   });
   await new Promise((res, rej) => {
     console.log('Downloading youtube video...');
-    youtubedl.exec(
-      `https://www.youtube.com/watch?v=${id}`,
-      ['-f', 'bestvideo+bestaudio[ext=m4a]/bestvideo+bestaudio/best', '--merge-output-format', 'mp4', '--output', path.join(output, 'youtube.mp4')],
-      {},
-      (err, msg) => {
-        if (err) {
-          rej(err);
-        }
-        console.log(msg.join('\n'));
-        res();
-      },
-    );
+    const command = `youtube-dl 'https://www.youtube.com/watch?v=${id}' -f 'bestvideo+bestaudio[ext=m4a]/bestvideo+bestaudio/best' --merge-output-format mp4 --output '${path.join(output, 'youtube.mp4')}'`;
+    console.log(command);
+    const updateStatus = throttle((status) => {
+      process.send({
+        status,
+      });
+    }, 15000);
+    const cp = exec(command, (e, out) => {
+      updateStatus.flush();
+      if (e) {
+        rej(out);
+      }
+      res();
+    });
+    cp.stdout.on('data', (data) => {
+      updateStatus(data.toString().replace('[download]', '[youtube]'));
+    });
   });
 }
 
@@ -84,11 +89,28 @@ async function downloadMega(url, output) {
   const filePath = path.join(output, 'mega.mp4');
   const before = Date.now();
   await new Promise((res, rej) => {
-    exec(`megatools dl --username '${megaEmail}' --password '${megaPass}' --path '${filePath}' '${url}'`, (e, out, stderr) => {
+    const updateStatus = throttle((status) => {
+      process.send({
+        status,
+      });
+    }, 15000);
+    const cp = exec(`megatools dl --username '${megaEmail}' --password '${megaPass}' --path '${filePath}' '${url}'`, (e, out, stderr) => {
+      updateStatus.flush();
       if (e) {
+        if (stderr.toString().includes('File already exists')) {
+          console.log('MEGA file already downloaded');
+          res();
+          return;
+        }
         rej(stderr);
       }
       res();
+    });
+    cp.stdout.on('data', (data) => {
+      const status = data.toString().trim();
+      if (status.length > 0) {
+        updateStatus(`[mega] ${data.toString()}`);
+      }
     });
   });
   if (Date.now() - before < 5000) {
@@ -117,18 +139,14 @@ async function videoCommand(id, output) {
   });
   await new Promise((res, rej) => {
     console.log('Downloading youtube thumbnail...');
-    youtubedl.exec(
-      `https://www.youtube.com/watch?v=${id}`,
-      ['--write-thumbnail', '--skip-download', '--output', path.join(output, 'thumbnail.jpg')],
-      {},
-      (err, msg) => {
-        if (err) {
-          rej(err);
-        }
-        console.log(msg.join('\n'));
-        res();
-      },
-    );
+    const command = `youtube-dl 'https://www.youtube.com/watch?v=${id}' --write-thumbnail --skip-download --output '${path.join(output, 'thumbnail.jpg')}'`;
+    console.log(command);
+    exec(command, (e, out) => {
+      if (e) {
+        rej(out);
+      }
+      res();
+    });
   });
   const validLinks = {
     bitchute: null,

@@ -3,7 +3,7 @@ const ffmpeg = require('fluent-ffmpeg');
 const { exec } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-
+const { throttle } = require('lodash');
 const { promisify } = require('util');
 
 const writeFile = promisify(fs.writeFile);
@@ -72,13 +72,22 @@ class CutInfo {
     ).join('');
     const outputFile = path.join(output, `${dest}.mp4`);
     await new Promise((res, rej) => {
-      const command = `ffmpeg -y ${iOption} -movflags faststart -filter_complex "${concatInputs}concat=n=${this.cuts.length}:v=1:a=1[v][a]" -map "[v]" -map "[a]" ${outputFile}`;
+      const command = `ffpb -y ${iOption} -movflags faststart -filter_complex "${concatInputs}concat=n=${this.cuts.length}:v=1:a=1[v][a]" -map "[v]" -map "[a]" ${outputFile}`;
       console.log(command);
-      exec(command, (e, out) => {
+      const updateStatus = throttle((status) => {
+        process.send({
+          status,
+        });
+      }, 15000);
+      const cp = exec(command, (e, out) => {
+        updateStatus.flush();
         if (e) {
           rej(out);
         }
         res();
+      });
+      cp.stderr.on('data', (data) => {
+        updateStatus(`[${dest}] ${data.toString()}`);
       });
     });
   }

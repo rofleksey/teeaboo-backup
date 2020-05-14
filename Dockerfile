@@ -1,6 +1,6 @@
 FROM alpine
 EXPOSE 2020
-RUN apk add --no-cache npm ca-certificates wget curl openssl ffmpeg python python3 aria2 && pip3 install youtube-dl
+RUN apk add --no-cache npm ca-certificates wget curl openssl ffmpeg python python3 aria2 && pip3 install youtube-dl ffpb
 COPY megatools /bin
 COPY /dist /app/dist
 COPY /server/compiler/compiler.js /server/compiler/videoSplitter.js /app/server/compiler/

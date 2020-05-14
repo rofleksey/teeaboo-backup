@@ -21,7 +21,7 @@ const unlink = util.promisify(fs.unlink);
 const app = express();
 const port = 2020;
 const VIDEO_CHECK_INTERVAL = 1000 * 60 * 20;
-const VIDEO_HISTORY_SIZE = 15;
+const VIDEO_HISTORY_SIZE = 45;
 const NAMESPACE = 'd9d88ddb-af7e-4e34-83bb-dafc12f56b47';
 const DATA_DIR = '../data';
 const INFO_UPDATE_INTERVAL = 10 * 1000;
@@ -220,7 +220,7 @@ async function executeTask(task) {
       const { code: downloaderCode, output: downloadOutput } = await runExternalNode(
         'Downloader',
         './downloader/downloader.js',
-        ['video', task.id.toString(), videoDir],
+        ['video', JSON.stringify(task.id.toString()), videoDir],
         messagesHandler(task, video),
       );
       if (downloaderCode === 0) {
