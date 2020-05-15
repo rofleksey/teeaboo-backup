@@ -44,13 +44,11 @@
 <script>
 import axios from 'axios';
 import videojs from 'video.js';
-import '../../public/video-js.min.css';
-import '../../public/videojs-seek-buttons.css';
-// import '../../public/videojs-playlist-ui.css';
-import '../../public/videojs-playlist-ui.vertical.css';
+import '../assets/video-js.min.css';
+import '../assets/videojs-seek-buttons.css';
+import '../assets/videojs-mobile-ui.css';
 
-// import '../../public/videojs-download';
-import '../../public/videojs-playlist-ui.min';
+import '../assets/videojs-mobile-ui.min';
 import 'videojs-hotkeys';
 import 'videojs-landscape-fullscreen';
 import 'videojs-seek-buttons';
@@ -107,6 +105,7 @@ export default {
         forward: 30,
         back: 10,
       });
+      player.mobileUi();
     });
     axios.get(`/api/watch?id=${videoId}`).then((res) => {
       const playlist = res.data.map((file) => ({

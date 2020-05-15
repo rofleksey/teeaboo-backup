@@ -33,7 +33,7 @@ if (!process.send) {
 }
 
 async function listCommand(count) {
-  const response = await axios.get(`${apiPrefix}search?key=${apiKey}&channelId=${channelId}&part=snippet,id&order=date&maxResults=${count}`);
+  const response = await axios.get(`${apiPrefix}search?key=${apiKey}&channelId=${channelId}&order=date&part=snippet,id&order=date&maxResults=${count}`);
   await new Promise((res) => process.send({
     result: response.data,
   }, res));

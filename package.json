@@ -16,7 +16,6 @@
     "videojs-hotkeys": "^0.2.25",
     "videojs-landscape-fullscreen": "^1.5.1",
     "videojs-playlist": "^4.3.1",
-    "videojs-playlist-ui": "^3.8.0",
     "videojs-seek-buttons": "^1.6.0",
     "vue": "^2.6.11",
     "vue-loading-overlay": "^3.3.2",

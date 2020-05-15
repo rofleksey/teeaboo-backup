@@ -79,4 +79,4 @@ export default {
 .content {
   background-color: #222222
 }
-</style>>
+</style>
