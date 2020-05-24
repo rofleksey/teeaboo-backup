@@ -7,6 +7,7 @@ export default new Vuex.Store({
   state: {
     videos: [],
     tasks: [],
+    manualMode: false,
   },
   mutations: {
     setVideos(state, videos) {
@@ -14,6 +15,9 @@ export default new Vuex.Store({
     },
     setTasks(state, tasks) {
       state.tasks = tasks;
+    },
+    setManualMode(state, isManual) {
+      state.manualMode = isManual;
     },
   },
   actions: {

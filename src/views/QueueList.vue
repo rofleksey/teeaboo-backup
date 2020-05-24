@@ -69,27 +69,100 @@
 
           <v-list-item-action>
             <v-list-item-action-text v-text="item.time"></v-list-item-action-text>
-            <v-menu offset-y>
-              <template v-slot:activator="{ on }">
-                <v-btn icon color="white" v-on="on">
-                  <v-icon class="mx-2" medium>mdi-dots-vertical</v-icon>
-                </v-btn>
-              </template>
-              <v-list>
-                <v-list-item @click="() => {}">
-                  <v-list-item-title>Reschedule</v-list-item-title>
-                </v-list-item>
-                <v-list-item @click="() => {}">
-                  <v-list-item-title>Delete</v-list-item-title>
-                </v-list-item>
-              </v-list>
-            </v-menu>
           </v-list-item-action>
         </v-list-item>
 
         <v-divider v-if="index + 1 < filteredTasks.length" :key="index"></v-divider>
       </template>
     </v-list>
+    <v-snackbar v-model="snackbar" :color="snackbarColor" :right="true" :timeout="5000" :top="true">
+      {{ snackbarText }}
+      <v-btn dark text @click="snackbar = false">Close</v-btn>
+    </v-snackbar>
+    <v-dialog v-if="manualMode" v-model="addDialog" scrollable max-width="300px">
+      <template v-slot:activator="{ on }">
+        <v-btn
+          color="#DC143C"
+          fab
+          large
+          dark
+          bottom
+          right
+          fixed
+          class="fab-add"
+          v-on="on"
+          @click="resetAddDialog"
+        >
+          <v-icon>mdi-plus</v-icon>
+        </v-btn>
+      </template>
+      <v-card>
+        <v-tabs v-model="addDialogTab" centered dark icons-and-text>
+          <v-tabs-slider></v-tabs-slider>
+
+          <v-tab href="#tab-single">
+            Single video
+            <v-icon>mdi-video</v-icon>
+          </v-tab>
+
+          <v-tab href="#tab-playlist">
+            Playlist
+            <v-icon>mdi-playlist-play</v-icon>
+          </v-tab>
+        </v-tabs>
+
+        <v-tabs-items v-model="addDialogTab">
+          <v-tab-item value="tab-single">
+            <v-card flat>
+              <v-card-text>
+                <v-form v-model="addDialogValid">
+                  <v-text-field
+                    v-model="addDialogId"
+                    :rules="[v => (v || '').trim().length > 0 || 'ID is empty']"
+                    label="Video ID"
+                    required
+                  ></v-text-field>
+                  <v-btn
+                    :loading="addDialogLoading"
+                    :disabled="!addDialogValid"
+                    color="blue-grey"
+                    class="ma-2 white--text"
+                    @click="submitSingle"
+                  >
+                    Upload
+                    <v-icon right dark>mdi-cloud-upload</v-icon>
+                  </v-btn>
+                </v-form>
+              </v-card-text>
+            </v-card>
+          </v-tab-item>
+          <v-tab-item value="tab-playlist">
+            <v-card flat>
+              <v-card-text>
+                <v-form v-model="addDialogValid">
+                  <v-text-field
+                    v-model="addDialogId"
+                    :rules="[v => (v || '').trim().length > 0 || 'ID is empty']"
+                    label="Playlist ID"
+                    required
+                  ></v-text-field>
+                  <v-btn
+                    :loading="addDialogLoading"
+                    :disabled="!addDialogValid"
+                    color="blue-grey"
+                    class="ma-2 white--text"
+                    @click="submitPlaylist"
+                  >
+                    Upload
+                    <v-icon right dark>mdi-cloud-upload</v-icon>
+                  </v-btn>
+                </v-form>
+              </v-card-text>
+            </v-card>
+          </v-tab-item>
+        </v-tabs-items>
+      </v-card>
+    </v-dialog>
   </v-container>
 </template>
 
@@ -111,6 +184,9 @@ export default {
     tasks() {
       return this.$store.state.tasks;
     },
+    manualMode() {
+      return this.$store.state.manualMode;
+    },
   },
   components: {
     Loading,
@@ -122,9 +198,72 @@ export default {
     if (this.tasks.length !== 0) {
       this.isLoading = false;
     }
-    const poll = () => {
+    this.poll();
+    this.intervalId = setInterval(this.poll, POLL_INTERVAL);
+    const pollInfo = () => {
+      axios.get('/api/info').then((res) => {
+        const { cpuUsage, memInfo, driveInfo } = res.data;
+        this.cpuUsage = cpuUsage;
+        this.memInfo = memInfo;
+        this.driveInfo = driveInfo;
+      });
+    };
+    pollInfo();
+    this.infoIntervalId = setInterval(pollInfo, INFO_POLL_INTERVAL);
+  },
+  unmounted() {
+    clearInterval(this.intervalId);
+    clearInterval(this.infoIntervalId);
+  },
+  methods: {
+    submitSingle() {
+      if (this.addDialogValid && !this.addDialogLoading) {
+        this.addDialogLoading = true;
+        axios
+          .post('/api/add', {
+            single: this.addDialogId,
+          })
+          .then(() => {
+            this.poll();
+            this.addDialog = false;
+            this.showSnackbar('OK', 'success');
+          })
+          .catch(() => {
+            this.showSnackbar('Error', 'error');
+          })
+          .finally(() => {
+            this.addDialogLoading = false;
+          });
+      }
+    },
+    submitPlaylist() {
+      if (this.addDialogValid && !this.addDialogLoading) {
+        this.addDialogLoading = true;
+        axios
+          .post('/api/add', {
+            playlist: this.addDialogId,
+          })
+          .then(() => {
+            this.poll();
+            this.addDialog = false;
+            this.showSnackbar('OK', 'success');
+          })
+          .catch(() => {
+            this.showSnackbar('Error', 'error');
+          })
+          .finally(() => {
+            this.addDialogLoading = false;
+          });
+      }
+    },
+    showSnackbar(text, color) {
+      this.snackbarText = text;
+      this.snackbarColor = color;
+      this.snackbar = true;
+    },
+    poll() {
       axios.get('/api/queue').then((res) => {
-        const { array } = res.data;
+        const { array, manualMode } = res.data;
         this.$store.commit('setTasks', array.map((task) => {
           let icon = 'mdi-question-mark';
           let color = 'black';
@@ -147,6 +286,7 @@ export default {
             color,
           });
         }).reverse());
+        this.$store.commit('setManualMode', manualMode);
         if (!this.alreadyScrolled) {
           setTimeout(() => {
             VueScrollTo.scrollTo('.processing-queue-item', 1000, {
@@ -162,23 +302,7 @@ export default {
       }).finally(() => {
         this.isLoading = false;
       });
-    };
-    poll();
-    this.intervalId = setInterval(poll, POLL_INTERVAL);
-    const pollInfo = () => {
-      axios.get('/api/info').then((res) => {
-        const { cpuUsage, memInfo, driveInfo } = res.data;
-        this.cpuUsage = cpuUsage;
-        this.memInfo = memInfo;
-        this.driveInfo = driveInfo;
-      });
-    };
-    pollInfo();
-    this.infoIntervalId = setInterval(pollInfo, INFO_POLL_INTERVAL);
-  },
-  unmounted() {
-    clearInterval(this.intervalId);
-    clearInterval(this.infoIntervalId);
+    },
   },
   data: () => ({
     alreadyScrolled: false,
@@ -188,6 +312,14 @@ export default {
     cpuUsage: 0,
     driveInfo: null,
     memInfo: null,
+    snackbar: false,
+    snackbarText: '',
+    snackbarColor: '',
+    addDialog: false,
+    addDialogId: '',
+    addDialogValid: false,
+    addDialogTab: null,
+    addDialogLoading: false,
   }),
 };
 </script>
@@ -208,5 +340,8 @@ export default {
   100% {
     background-position: 0% 50%;
   }
+}
+.fab-add {
+  margin: 16px;
 }
 </style>

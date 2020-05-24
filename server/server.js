@@ -11,7 +11,26 @@ const util = require('util');
 const { fork } = require('child_process');
 const { drive, mem, cpu } = require('node-os-utils');
 const rimraf = require('rimraf');
-// const { sortBy } = require('lodash');
+
+const VIDEO_HISTORY_SIZE = 45;
+
+const consoleArgs = require('yargs')
+  .scriptName('server')
+  .option('m', {
+    alias: 'manual',
+    describe: 'runs server in manual mode',
+    type: 'boolean',
+    default: false,
+  })
+  .option('s', {
+    alias: 'size',
+    describe: 'maximum history size',
+    type: 'number',
+    default: VIDEO_HISTORY_SIZE,
+  })
+  .help()
+  .argv;
+
 
 const exists = util.promisify(fs.exists);
 const mkdir = util.promisify(fs.mkdir);
@@ -22,7 +41,6 @@ const unlink = util.promisify(fs.unlink);
 const app = express();
 const port = 2020;
 const VIDEO_CHECK_INTERVAL = 1000 * 60 * 20;
-const VIDEO_HISTORY_SIZE = 45;
 const NAMESPACE = 'd9d88ddb-af7e-4e34-83bb-dafc12f56b47';
 const DATA_DIR = '../data';
 const INFO_UPDATE_INTERVAL = 10 * 1000;
@@ -96,12 +114,51 @@ async function runExternalNode(name, command, args, messageCb) {
   });
 }
 
+async function addItemsToQueue(items) {
+  let newTasks = 0;
+  if (items) {
+    items.reverse().forEach((item) => {
+      try {
+        if (
+          queue.array.findIndex((task) => task.id === (item.id.videoId || item.id)) < 0
+        ) {
+          const vIndex = videos.findIndex((v) => v.id === (item.id.videoId || item.id));
+          if (vIndex >= 0 && videos[vIndex].status === 'ready') {
+            queue.array.push({
+              type: 'youtube',
+              id: item.id.videoId || item.id,
+              name: sanitize(item.snippet.title),
+              status: 'ready',
+              statusText: 'Ready!',
+              time: videos[vIndex].time,
+            });
+          } else {
+            queue.array.push({
+              type: 'youtube',
+              id: item.id.videoId || item.id,
+              name: sanitize(item.snippet.title),
+              status: 'pending',
+              statusText: 'Pending',
+              time: Date.now(),
+            });
+          }
+          newTasks += 1;
+        }
+      } catch (e) {
+        console.error(`Error parsing video info: ${e}`);
+      }
+    });
+    await saveObjectToFile(queue, 'queue.json');
+  }
+  return newTasks;
+}
+
 async function checkVideos() {
   console.log('Checking for new videos...');
   let resultCode = 1;
   let resultOutput = null;
   try {
-    const { code, output } = await runExternalNode('Checker', 'downloader/downloader.js', ['list', `${VIDEO_HISTORY_SIZE}`]);
+    const { code, output } = await runExternalNode('Checker', 'downloader/downloader.js', ['list', `${consoleArgs.size}`]);
     resultCode = code;
     resultOutput = output;
   } catch (e) {
@@ -109,41 +166,7 @@ async function checkVideos() {
   }
   if (resultCode === 0) {
     videoCheckTimeoutId = setTimeout(checkVideos, VIDEO_CHECK_INTERVAL);
-    let newTasks = 0;
-    if (resultOutput.items) {
-      resultOutput.items.reverse().forEach((item) => {
-        try {
-          if (
-            queue.array.findIndex((task) => task.id === item.id.videoId) < 0
-          ) {
-            const vIndex = videos.findIndex((v) => v.id === item.id.videoId);
-            if (vIndex >= 0 && videos[vIndex].status === 'ready') {
-              queue.array.push({
-                type: 'youtube',
-                id: item.id.videoId,
-                name: sanitize(item.snippet.title),
-                status: 'ready',
-                statusText: 'Ready!',
-                time: videos[vIndex].time,
-              });
-            } else {
-              queue.array.push({
-                type: 'youtube',
-                id: item.id.videoId,
-                name: sanitize(item.snippet.title),
-                status: 'pending',
-                statusText: 'Pending',
-                time: Date.now(),
-              });
-            }
-            newTasks += 1;
-          }
-        } catch (e) {
-          console.error(`Error parsing video info: ${e}`);
-        }
-      });
-      await saveObjectToFile(queue, 'queue.json');
-    }
+    const newTasks = await addItemsToQueue(resultOutput.items);
     console.log(`Queued ${newTasks} new videos!`);
   } else {
     console.warn('Failed to queue new videos!');
@@ -170,7 +193,7 @@ function messagesHandler(task, video) {
 
 async function cleanupVideos() {
   try {
-    while (videos.length > VIDEO_HISTORY_SIZE) {
+    while (videos.length > consoleArgs.size) {
       if (videos[0].status === 'processing') {
         return;
       }
@@ -286,6 +309,32 @@ async function executeTask(task) {
   }
 }
 
+async function handleManualRequest(req) {
+  let commandType = '';
+  if (req.single) {
+    commandType = 'single';
+  } else if (req.playlist) {
+    commandType = 'playlist';
+  }
+  const id = req.single || req.playlist;
+  let resultCode = 1;
+  let resultOutput = null;
+  try {
+    const { code, output } = await runExternalNode('Checker', 'downloader/downloader.js', [commandType, `${id}`]);
+    resultCode = code;
+    resultOutput = output;
+  } catch (e) {
+    console.warn(e);
+  }
+  if (resultCode === 0) {
+    videoCheckTimeoutId = setTimeout(checkVideos, VIDEO_CHECK_INTERVAL);
+    const newTasks = await addItemsToQueue(resultOutput.items);
+    console.log(`Queued ${newTasks} new videos!`);
+  } else {
+    console.warn('Failed to queue new videos!');
+  }
+}
+
 function delay(time) {
   return new Promise((res) => setTimeout(res, time));
 }
@@ -309,9 +358,11 @@ async function mainLoop() {
   queue.pointer = 0;
   videos = await loadObjectFromFile('videos.json', []);
   // sortVideos();
-  checkVideos().catch((e) => {
-    console.error(e);
-  });
+  if (!consoleArgs.manual) {
+    checkVideos().catch((e) => {
+      console.error(e);
+    });
+  }
   // eslint-disable-next-line no-constant-condition
   while (true) {
     await cleanupVideos();
@@ -362,12 +413,24 @@ app.get('/api/videos', async (req, res) => {
   }
 });
 
+app.post('/api/add', async (req, res) => {
+  try {
+    console.log(req.body);
+    await handleManualRequest(req.body);
+    res.end('OK');
+  } catch (e) {
+    console.error(e);
+    res.status(500).end();
+  }
+});
+
 app.get('/api/queue', async (req, res) => {
   try {
     res.setHeader('Content-Type', 'application/json');
     res.end(JSON.stringify({
       array: queue.array.map((t) => ({ ...t, time: timeAgo.format(t.time || 0) })),
       pointer: queue.pointer,
+      manualMode: consoleArgs.manual,
     }));
   } catch (e) {
     console.error(e);

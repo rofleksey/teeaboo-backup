@@ -11,17 +11,8 @@
             <v-list-item-title>{{ item.text }}</v-list-item-title>
           </v-list-item-content>
         </v-list-item>
-        <v-list-item link>
-          <v-list-item-action>
-            <v-icon color="grey darken-1">mdi-cog</v-icon>
-          </v-list-item-action>
-          <v-list-item-title class="grey--text text--darken-1">
-            Settings
-          </v-list-item-title>
-        </v-list-item>
       </v-list>
     </v-navigation-drawer>
-
     <v-app-bar app clipped-left color="#6f930b" dense>
       <v-app-bar-nav-icon @click.stop="drawer = !drawer" />
       <v-icon class="mx-2" medium>mdi-tea</v-icon>

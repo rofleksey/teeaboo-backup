@@ -40,6 +40,24 @@ async function listCommand(count) {
   console.log(`Retreived ${response.data.items ? response.data.items.length : 'unknown number of'} items!`);
 }
 
+async function playlistCommand(id) {
+  const playlistResponse = await axios.get(`${apiPrefix}playlistItems?key=${apiKey}&playlistId=${id}&part=snippet&maxResults=50`);
+  const ids = playlistResponse.data.items.map((item) => item.snippet.resourceId.videoId).reverse();
+  const response = await axios.get(`${apiPrefix}videos?key=${apiKey}&id=${ids.join(',')}&part=snippet,id`);
+  await new Promise((res) => process.send({
+    result: response.data,
+  }, res));
+  console.log(`Retreived ${response.data.items ? response.data.items.length : 'unknown number of'} items!`);
+}
+
+async function singleCommand(id) {
+  const response = await axios.get(`${apiPrefix}videos?key=${apiKey}&id=${id}&part=snippet,id`);
+  await new Promise((res) => process.send({
+    result: response.data,
+  }, res));
+  console.log(`Retreived ${response.data.items ? response.data.items.length : 'unknown number of'} items!`);
+}
+
 async function downloadYoutube(id, output) {
   process.send({
     status: 'Downloading youtube video...',
@@ -244,6 +262,26 @@ const { argv } = require('yargs')
       });
   }, (args) => {
     listCommand(args.count).catch(axiosErrorCatcher);
+  })
+  .command('single <id>', 'get info about a single video', (yargs) => {
+    yargs
+      .positional('id', {
+        describe: 'id of the video',
+        type: 'string',
+        demandOption: true,
+      });
+  }, (args) => {
+    singleCommand(args.id).catch(axiosErrorCatcher);
+  })
+  .command('playlist <id>', 'get info about a videos in a playlist', (yargs) => {
+    yargs
+      .positional('id', {
+        describe: 'id of the playlist',
+        type: 'string',
+        demandOption: true,
+      });
+  }, (args) => {
+    playlistCommand(args.id).catch(axiosErrorCatcher);
   })
   .command('video <id> <output>', 'download target video', (yargs) => {
     yargs
